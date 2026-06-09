@@ -1,0 +1,803 @@
+package Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi;
+
+# ABSTRACT: Generate OpenAPI specification from DBIx::Class sources
+
+use Mojo::Base 'Mojolicious::Command', -signatures;
+
+use Mojo::File 'path';
+use Mojo::JSON qw(encode_json true false);
+
+our $VERSION = '0.01';
+
+has description => 'Generate OpenAPI specification';
+has usage       => sub ($self) {
+    <<"USAGE";
+Usage: APPLICATION openapi generate [OPTIONS]
+
+  myapp.pl openapi generate               Generate share/openapi.json
+  myapp.pl openapi generate -y            Force overwrite without prompt
+  myapp.pl openapi generate --output FILE Custom output path
+
+USAGE
+};
+
+# ---------------------------------------------------------------------------
+# Entry point
+# ---------------------------------------------------------------------------
+
+sub run ($self, @args) {
+    my $app = $self->app;
+
+    my $config = $app->defaults->{'openapi.config'}
+        or die "OpenAPI not configured. Add Fondation::OpenAPI to your config.\n";
+
+    my $subcommand = shift @args || '';
+
+    die $self->usage unless $subcommand eq 'generate';
+
+    # Parse options
+    my $force  = 0;
+    my $output = 'share/openapi.json';
+
+    while (@args) {
+        my $arg = shift @args;
+        if ($arg eq '-y') {
+            $force = 1;
+        }
+        elsif ($arg eq '--output' && @args) {
+            $output = shift @args;
+        }
+        else {
+            die "Unknown option: $arg\n" . $self->usage;
+        }
+    }
+
+    # Check overwrite
+    my $output_path = $app->home->child($output);
+    if (!$force && -f $output_path) {
+        print "File '$output' already exists. Overwrite? [y/N] ";
+        my $answer = <STDIN>;
+        chomp $answer;
+        exit(0) unless $answer =~ /^y(es)?$/i;
+    }
+
+    # Resolve schema class
+    my $schema_class = $self->_get_schema_class($app, $config)
+        or return;
+
+    # Generate spec
+    my $spec = $self->_build_spec($schema_class, $app, $config);
+
+    # Write OpenAPI spec
+    $output_path->dirname->make_path;
+    $output_path->spew(encode_json($spec));
+
+    my $source_count = scalar keys %{$spec->{components}{schemas}};
+    say "OpenAPI spec written to $output ($source_count source(s))";
+
+    # Generate and write client-side validators.js
+    my $validators_js = $self->_build_validators_js($spec);
+    my $validators_path = $app->home->child('public', 'js', 'validators.js');
+    $validators_path->dirname->make_path;
+    $validators_path->spew($validators_js);
+    say "Client validators written to public/js/validators.js";
+}
+
+# ---------------------------------------------------------------------------
+# Build client-side validators.js from the OpenAPI spec
+# ---------------------------------------------------------------------------
+
+sub _build_validators_js ($self, $spec) {
+    my $schemas = $spec->{components}{schemas};
+    my $schemas_js = '';
+
+    for my $name (sort keys %$schemas) {
+        my $schema = $schemas->{$name};
+        my $props  = $schema->{properties} // {};
+
+        $schemas_js .= "FondationSchemas['$name'] = {\n";
+        $schemas_js .= "  properties: {\n";
+
+        for my $prop (sort keys %$props) {
+            my $def = $props->{$prop};
+            my @rules;
+
+            push @rules, "required: true"
+                if grep { $_ eq $prop } @{ $schema->{required} // [] };
+            push @rules, "type: '" . $def->{type} . "'"
+                if $def->{type};
+            push @rules, "minLength: " . $def->{minLength}
+                if $def->{minLength};
+            push @rules, "maxLength: " . $def->{maxLength}
+                if $def->{maxLength};
+            push @rules, "format: '" . $def->{format} . "'"
+                if $def->{format};
+            push @rules, "nullable: true"
+                if $def->{nullable};
+            push @rules, "readOnly: true"
+                if $def->{readOnly};
+            push @rules, "writeOnly: true"
+                if $def->{writeOnly};
+
+            $schemas_js .= "    '$prop': { " . join(', ', @rules) . " },\n";
+        }
+
+        $schemas_js .= "  }\n";
+        $schemas_js .= "};\n\n";
+    }
+
+    my $validators = <<'VALIDATORS';
+var FondationSchemas = {};
+SCHEMAS_PLACEHOLDER
+
+window.FondationValidators = {
+    validate: function(schemaName, data) {
+        var schema = FondationSchemas[schemaName];
+        if (!schema) return { valid: false, errors: ['Schema not found: ' + schemaName] };
+
+        var errors = [];
+
+        for (var prop in schema.properties) {
+            var rules = schema.properties[prop];
+            var val   = data[prop];
+
+            // Skip writeOnly fields (e.g. password in request bodies)
+            if (rules.writeOnly) continue;
+
+            // Required check (skip readOnly -- server-managed)
+            if (rules.required && !rules.readOnly) {
+                if (val === undefined || val === null || val === '') {
+                    errors.push(prop + ' is required');
+                    continue;
+                }
+            }
+
+            // Skip further checks if value is empty and not required
+            if (val === undefined || val === null || val === '') {
+                if (rules.nullable) continue;
+                continue;
+            }
+
+            // Type check
+            if (rules.type === 'integer') {
+                var n = Number(val);
+                if (isNaN(n) || !Number.isInteger(n)) {
+                    errors.push(prop + ' must be an integer');
+                    continue;
+                }
+            }
+
+            // Format check
+            if (rules.format === 'email') {
+                if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+                    errors.push(prop + ' must be a valid email');
+                }
+            }
+
+            // Min length
+            if (rules.minLength && typeof val === 'string' && val.length < rules.minLength) {
+                errors.push(prop + ' must be at least ' + rules.minLength + ' characters');
+            }
+
+            // Max length
+            if (rules.maxLength && typeof val === 'string' && val.length > rules.maxLength) {
+                errors.push(prop + ' must be at most ' + rules.maxLength + ' characters');
+            }
+
+            // Enum check
+            if (rules.enum) {
+                var match = false;
+                for (var i = 0; i < rules.enum.length; i++) {
+                    if (rules.type === 'integer') {
+                        if (Number(val) === rules.enum[i]) { match = true; break; }
+                    } else {
+                        if (val === String(rules.enum[i])) { match = true; break; }
+                    }
+                }
+                if (!match) {
+                    errors.push(prop + ' must be one of: ' + rules.enum.join(', '));
+                }
+            }
+
+            // Password format
+            if (rules.format === 'password') {
+                if (typeof val === 'string' && val.length > 0 && val.length < (rules.minLength || 8)) {
+                    errors.push(prop + ' must be at least ' + (rules.minLength || 8) + ' characters');
+                }
+            }
+        }
+
+        return {
+            valid: errors.length === 0,
+            errors: errors
+        };
+    }
+};
+VALIDATORS
+
+    $validators =~ s/SCHEMAS_PLACEHOLDER/$schemas_js/;
+    return $validators;
+}
+
+# ---------------------------------------------------------------------------
+# Build complete OpenAPI spec from DBIx::Class sources
+# ---------------------------------------------------------------------------
+
+sub _build_spec ($self, $schema_class, $app, $config) {
+    my $spec = {
+        openapi => '3.0.3',
+        info    => {
+            title       => 'Fondation API',
+            version     => '1.0',
+            description => 'AUTO-GENERATED — Do not modify manually',
+        },
+        servers    => [{url => '/api'}],
+        paths      => {},
+        components => {schemas => {}},
+    };
+
+    # Config overrides: schemas => { Source => { columns => { Col => {...} } } }
+    my $schemas_config = $config->{schemas} // {};
+
+    my %seen;
+
+    for my $source_name ($schema_class->sources) {
+        # Only process monikers (e.g. 'Foo'), not table names ('foos')
+        next unless $source_name =~ /^[A-Z]/;
+
+        my $source = $schema_class->source($source_name);
+        my $table  = $source->name;
+
+        next if $seen{$table}++;
+
+        my $columns_info = $source->columns_info;
+        my $controller   = $source_name;
+        my $src_config   = $schemas_config->{$source_name} // {};
+        my $col_configs  = $src_config->{columns} // {};
+
+        # ------------------------------------------------------------------
+        # ÉTAPE A — Construire l'API Base
+        # ------------------------------------------------------------------
+        my %api_props;
+        my @api_required;
+
+        for my $col (sort keys %$columns_info) {
+            my $info    = $columns_info->{$col};
+            my $openapi = $info->{extra}{openapi} // {};
+            my $cfg     = $col_configs->{$col} // {};
+            my %prop;
+
+            # --- Niveau 1: Structure DBIx (implicite) ---
+            $prop{type}      = $self->_resolve_type($info);
+            $prop{maxLength} = int($info->{size})
+                if $prop{type} eq 'string' && defined $info->{size};
+            $prop{nullable}  = true if $info->{is_nullable};
+            $prop{default}   = $info->{default_value}
+                if defined $info->{default_value};
+
+            # Implicit rules from DBIx structure
+            $prop{readOnly} = true if $info->{is_auto_increment};
+            $prop{readOnly} = true if $col eq 'created_at' || $col eq 'updated_at';
+            $prop{format}   = 'date'       if $info->{data_type} =~ /^date$/i;
+            $prop{format}   = 'date-time'  if $info->{data_type} =~ /datetime|timestamp/i;
+            $prop{format}   = 'float'      if $info->{data_type} =~ /^float$/i;
+            $prop{format}   = 'double'     if $info->{data_type} =~ /^double$/i;
+
+            # --- Niveau 2: extra->{openapi} clés plates ---
+            $self->_apply_openapi_flat(\%prop, $openapi);
+
+            # --- Niveau 3: Config override clés plates ---
+            $self->_apply_openapi_flat(\%prop, $cfg);
+
+            # Description fallback
+            $prop{description} //= ucfirst join(' ', split /[_-]/, $col);
+
+            $api_props{$col} = \%prop;
+
+            # Required: is_nullable explicitly set to 0 AND NOT writeOnly/readOnly
+            if ((exists $info->{is_nullable} && !$info->{is_nullable})
+                && !$prop{writeOnly} && !$prop{readOnly}) {
+                push @api_required, $col;
+            }
+        }
+
+        # API Base: exclude writeOnly properties
+        my %api_base_props;
+        for my $col (sort keys %api_props) {
+            next if $api_props{$col}{writeOnly};
+            $api_base_props{$col} = $api_props{$col};
+        }
+
+        my $api_base = {
+            type        => 'object',
+            title       => $source_name,
+            description => "Schema for $source_name",
+            properties  => \%api_base_props,
+            required    => \@api_required,
+        };
+
+        # Store writeOnly columns for create/update contexts
+        my @write_only_cols = grep { $api_props{$_}{writeOnly} } sort keys %api_props;
+
+        # ------------------------------------------------------------------
+        # ÉTAPE B — Construire les projections contextuelles
+        # ------------------------------------------------------------------
+        my %contexts;
+        my @context_names = qw(create update read list);
+
+        for my $ctx_name (@context_names) {
+            my $ctx_required = [@api_required];
+
+            # Start with API Base properties
+            my %ctx_props = %api_base_props;
+
+            # create/update: add writeOnly properties
+            if ($ctx_name eq 'create' || $ctx_name eq 'update') {
+                for my $wcol (@write_only_cols) {
+                    $ctx_props{$wcol} = $api_props{$wcol};
+                }
+            }
+
+            for my $col (sort keys %$columns_info) {
+                my $openapi = $columns_info->{$col}{extra}{openapi} // {};
+                my $cfg     = $col_configs->{$col} // {};
+
+                # Contextual required: extra->{openapi}->{contexte}->{required}
+                if (exists $openapi->{$ctx_name}{required}) {
+                    if ($openapi->{$ctx_name}{required}) {
+                        push @$ctx_required, $col
+                            unless grep { $_ eq $col } @$ctx_required;
+                    }
+                    else {
+                        @$ctx_required = grep { $_ ne $col } @$ctx_required;
+                    }
+                }
+
+                # Contextual required: config override
+                if (exists $cfg->{$ctx_name}{required}) {
+                    if ($cfg->{$ctx_name}{required}) {
+                        push @$ctx_required, $col
+                            unless grep { $_ eq $col } @$ctx_required;
+                    }
+                    else {
+                        @$ctx_required = grep { $_ ne $col } @$ctx_required;
+                    }
+                }
+            }
+
+            # Compare properties + required (order-independent)
+            unless ($self->_schema_equal(
+                \%ctx_props, $ctx_required,
+                \%api_base_props, \@api_required
+            )) {
+                $contexts{$ctx_name} = {
+                    type        => 'object',
+                    title       => "$source_name ($ctx_name)",
+                    description => "Schema for $ctx_name on $source_name",
+                    properties  => \%ctx_props,
+                    required    => $ctx_required,
+                };
+            }
+        }
+
+        # ------------------------------------------------------------------
+        # ÉTAPE C — Enregistrer les schémas
+        # ------------------------------------------------------------------
+        $spec->{components}{schemas}{$source_name} = $api_base;
+
+        for my $ctx_name (@context_names) {
+            next unless $contexts{$ctx_name};
+            $spec->{components}{schemas}{"${source_name}\u$ctx_name"} = $contexts{$ctx_name};
+        }
+
+        # ------------------------------------------------------------------
+        # ÉTAPE D — Générer les paths CRUD
+        # ------------------------------------------------------------------
+        my $path_name = lc $source_name;
+
+        # Helper: resolve schema ref for a context
+        my $schema_ref = sub ($ctx) {
+            my $key = "${source_name}\u$ctx";
+            return $contexts{$ctx}
+                ? "#/components/schemas/$key"
+                : "#/components/schemas/$source_name";
+        };
+
+        # Collection paths
+        $spec->{paths}{"/$path_name"} = {
+            get => {
+                summary     => "List all $path_name",
+                operationId => "list_$path_name",
+                responses   => {
+                    '200' => {
+                        description => 'Success',
+                        content     => {
+                            'application/json' => {
+                                schema => {
+                                    type  => 'array',
+                                    items => {'$ref' => $schema_ref->('list')},
+                                },
+                            },
+                        },
+                    },
+                },
+                'x-mojo-to' => "$controller#list",
+            },
+            post => {
+                summary     => "Create a new $path_name",
+                operationId => "create_$path_name",
+                requestBody => {
+                    required => true,
+                    content  => {
+                        'application/json' => {
+                            schema => {'$ref' => $schema_ref->('create')},
+                        },
+                    },
+                },
+                responses  => {'201' => {description => 'Created'}},
+                'x-mojo-to' => "$controller#create",
+            },
+        };
+
+        # Item paths
+        $spec->{paths}{"/$path_name/{id}"} = {
+            parameters => [
+                {in => 'path', name => 'id', required => true, schema => {type => 'integer'}},
+            ],
+            get => {
+                summary     => "Get a $path_name by ID",
+                operationId => "read_$path_name",
+                responses   => {
+                    '200' => {
+                        description => 'Success',
+                        content     => {
+                            'application/json' => {
+                                schema => {'$ref' => $schema_ref->('read')},
+                            },
+                        },
+                    },
+                },
+                'x-mojo-to' => "$controller#read",
+            },
+            put => {
+                summary     => "Update a $path_name by ID",
+                operationId => "update_$path_name",
+                requestBody => {
+                    required => true,
+                    content  => {
+                        'application/json' => {
+                            schema => {'$ref' => $schema_ref->('update')},
+                        },
+                    },
+                },
+                responses   => {'200' => {description => 'Success'}},
+                'x-mojo-to' => "$controller#update",
+            },
+            delete => {
+                summary     => "Delete a $path_name by ID",
+                operationId => "delete_$path_name",
+                responses   => {'204' => {description => 'Deleted'}},
+                'x-mojo-to' => "$controller#delete",
+            },
+        };
+    }
+
+    return $spec;
+}
+
+# ---------------------------------------------------------------------------
+# Resolve OpenAPI type from DBIx data_type
+# ---------------------------------------------------------------------------
+
+sub _resolve_type ($self, $info) {
+    my $dt = $info->{data_type} // '';
+    return 'integer' if $dt =~ /int|integer|serial|bigint|smallint|tinyint|mediumint/i;
+    return 'number'  if $dt =~ /float|decimal|numeric|real|double/i && $dt !~ /double precision/i;
+    return 'number'  if $dt =~ /double precision/i;
+    return 'boolean' if $dt =~ /boolean/i;
+    return 'string';
+}
+
+# ---------------------------------------------------------------------------
+# Apply openapi flat keys (non-contextual) to a property hashref
+# ---------------------------------------------------------------------------
+
+sub _apply_openapi_flat ($self, $prop, $openapi) {
+    my %flat_keys = map { $_ => 1 } qw(
+        format minLength maxLength minimum maximum
+        enum writeOnly readOnly description
+        type nullable default
+    );
+
+    my %bool_keys = map { $_ => 1 } qw(writeOnly readOnly nullable);
+
+    for my $k (keys %$openapi) {
+        next unless $flat_keys{$k};
+        if ($bool_keys{$k}) {
+            $prop->{$k} = $openapi->{$k} ? true : false;
+        } else {
+            $prop->{$k} = $openapi->{$k};
+        }
+    }
+}
+
+# ---------------------------------------------------------------------------
+# Compare two schemas: property names + required arrays (order-independent)
+# ---------------------------------------------------------------------------
+
+sub _schema_equal ($self, $props_a, $req_a, $props_b, $req_b) {
+    # Compare property names
+    my @keys_a = sort keys %$props_a;
+    my @keys_b = sort keys %$props_b;
+    return 0 if @keys_a != @keys_b;
+    for my $i (0 .. $#keys_a) {
+        return 0 unless $keys_a[$i] eq $keys_b[$i];
+    }
+
+    # Compare required (order-independent)
+    return 0 if @$req_a != @$req_b;
+    my %seen = map { $_ => 1 } @$req_a;
+    for my $item (@$req_b) {
+        return 0 unless $seen{$item};
+    }
+
+    return 1;
+}
+
+# ---------------------------------------------------------------------------
+# Resolve schema class name from backend config (no DB connection needed)
+# ---------------------------------------------------------------------------
+
+sub _get_schema_class ($self, $app, $config) {
+    # Resolve backend: explicit config → DBIx::Async default → first backend → undef
+    my $c = $app->build_controller;
+    my $backend_name;
+    if ($c->has_helper('default_backend_name')) {
+        $backend_name = $c->default_backend_name($config->{backend});
+    } else {
+        $backend_name = $config->{backend};
+    }
+
+    unless ($backend_name) {
+        say "No backend configured. Set 'backend' in OpenAPI config"
+            . " or 'default_backend' in Fondation::Model::DBIx::Async.";
+        return undef;
+    }
+
+    unless ($c->has_helper('backend_config')) {
+        say "Fondation::Model::DBIx::Async is not loaded. No backend_config helper.";
+        return undef;
+    }
+
+    my $bdef = eval { $c->backend_config($backend_name) };
+    unless ($bdef) {
+        say "Backend '$backend_name' not found.";
+        return undef;
+    }
+
+    my $schema_class = $bdef->{schema_class}
+        or die "No schema_class configured for backend '$backend_name'\n";
+
+    eval "require $schema_class; 1"
+        or die "Cannot load schema class $schema_class: $@\n";
+
+    return $schema_class;
+}
+
+1;
+
+__END__
+
+=pod
+
+=encoding UTF-8
+
+=head1 NAME
+
+Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi - Generate OpenAPI specification from DBIx::Class sources
+
+=head1 SYNOPSIS
+
+  $ myapp.pl openapi generate
+  $ myapp.pl openapi generate -y
+  $ myapp.pl openapi generate --output custom.json
+
+=head1 DESCRIPTION
+
+Command-line interface for generating an OpenAPI 3.0.3 specification
+from DBIx::Class sources discovered via L<Fondation::Model::DBIx::Async>.
+
+No database connection is required — sources are read from the schema
+class metadata via C<< $schema_class->sources >>.
+
+=head1 DESIGN
+
+=head2 Two layers
+
+The generator works with two conceptual layers:
+
+=over
+
+=item DBIx source
+
+The raw database structure: column types, constraints, defaults.
+
+=item API Base
+
+The canonical OpenAPI representation of the resource. Built from the
+DBIx source with implicit rules applied, then overridden by
+C<extra-E<gt>{openapi}> annotations and plugin configuration.
+
+=back
+
+=head2 Implicit rules
+
+The following rules are derived automatically from DBIx structure and
+require no C<extra-E<gt>{openapi}> annotations:
+
+  DBIx                          → OpenAPI
+  ─────────────────────────────   ───────
+  is_auto_increment = 1          readOnly: true
+  column named created_at        readOnly: true
+  column named updated_at        readOnly: true
+  data_type =~ /^date$/i         format: "date"
+  data_type =~ /datetime/i       format: "date-time"
+  data_type =~ /timestamp/i      format: "date-time"
+  data_type =~ /^float$/i        format: "float"
+  data_type =~ /^double$/i       format: "double"
+  is_nullable = 0                required (unless writeOnly/readOnly)
+  size = N (string type)         maxLength: N
+  data_type =~ /int|serial/i     type: "integer"
+  data_type =~ /float|decimal/i  type: "number"
+  data_type =~ /boolean/i        type: "boolean"
+  default_value                  default
+  is_nullable = 1                nullable: true
+
+=head2 extra->{openapi} annotations
+
+Semantic choices that cannot be derived from DBIx are declared in the
+Result class via C<extra-E<gt>{openapi}>:
+
+  username => {
+      data_type => 'varchar', size => 100, is_nullable => 0,
+      extra => {
+          openapi => {
+              minLength => 4,
+          },
+      },
+  },
+
+=head3 Flat keys (apply to all contexts)
+
+  format      — "email", "password", "uri", etc.
+  minLength   — minimum string length
+  maxLength   — maximum string length (overrides DBIx size)
+  minimum     — minimum numeric value
+  maximum     — maximum numeric value
+  enum        — arrayref of allowed values
+  writeOnly   — boolean, field only sent in requests
+  readOnly    — boolean, field only sent in responses (overrides implicit)
+  description — human-readable description
+  type        — override the inferred OpenAPI type
+  nullable    — override the inferred nullability
+  default     — override the inferred default value
+
+=head3 Contextual keys (per-operation overrides)
+
+  create => { required => 1 }   # force required on POST
+  create => { required => 0 }   # force optional on POST
+  update => { required => 1 }   # force required on PUT
+  update => { required => 0 }   # force optional on PUT
+  read   => { required => 1 }   # force required on GET item
+  read   => { required => 0 }   # force optional on GET item
+  list   => { required => 1 }   # force required on GET collection
+  list   => { required => 0 }   # force optional on GET collection
+
+=head2 Conditional schema generation
+
+Contextual schemas (C<UserCreate>, C<UserUpdate>, C<UserRead>,
+C<UserList>) are generated I<only> when they differ from the API Base.
+Comparison considers both property names and the C<required> array.
+
+A simple source like C<Group> with no contextual rules produces a
+single canonical schema used everywhere. A complex source like C<User>
+with C<password> having C<create.required =E<gt> 1> and
+C<update.required =E<gt> 0> produces C<User>, C<UserCreate>, and
+C<UserUpdate>.
+
+=head2 writeOnly handling
+
+Fields marked C<writeOnly> are:
+
+=over
+
+=item * Excluded from the API Base C<required> array
+
+=item * Excluded from the API Base C<properties> hash
+
+=item * Added back into C<create> and C<update> projection properties
+
+=back
+
+This means GET responses never contain writeOnly fields and the
+OpenAPI validator does not expect them.
+
+=head2 Config override
+
+Any column property can be overridden via the plugin configuration
+without modifying DBIx classes:
+
+  'Fondation::OpenAPI' => {
+      backend => 'main',
+      schemas => {
+          User => {
+              columns => {
+                  name => {
+                      maxLength => 100,       # override DBIx size
+                  },
+                  password => {
+                      writeOnly => 1,
+                      create    => { required => 1 },
+                      update    => { required => 0 },
+                  },
+              },
+          },
+      },
+  },
+
+Config keys follow the same flat + contextual structure as
+C<extra-E<gt>{openapi}> and take the highest priority in the cascade:
+
+  1. Structure DBIx (implicit)
+  2. extra->{openapi} flat keys (Result class)
+  3. Config flat keys (myapp.conf)
+  4. extra->{openapi} contextual (Result class)
+  5. Config contextual (myapp.conf)
+
+=head1 SUBCOMMANDS
+
+=head2 generate
+
+  myapp.pl openapi generate
+  myapp.pl openapi generate -y
+  myapp.pl openapi generate --output custom.json
+
+Iterates all DBIx sources (monikers), builds the API Base for each,
+applies contextual projections, and writes two files:
+
+=over
+
+=item C<share/openapi.json>
+
+OpenAPI 3.0.3 specification with schemas and CRUD paths. Loaded at
+runtime by L<Mojolicious::Plugin::OpenAPI> for request validation.
+
+=item C<public/js/validators.js>
+
+Client-side validation (C<FondationValidators.validate()>) consumed
+by L<Fondation::Asset> bundles.
+
+=back
+
+Options:
+
+  --output FILE   Output path relative to $app->home (default: share/openapi.json)
+  -y              Overwrite without confirmation prompt
+
+=head1 CRUD PATHS
+
+Each source generates five endpoints with C<x-mojo-to> routing:
+
+  GET    /{moniker}       → {Moniker}#list    Response: array of canonical
+  POST   /{moniker}       → {Moniker}#create  Body: {Moniker}Create or canonical
+  GET    /{moniker}/{id}  → {Moniker}#read    Response: canonical
+  PUT    /{moniker}/{id}  → {Moniker}#update  Body: {Moniker}Update or canonical
+  DELETE /{moniker}/{id}  → {Moniker}#delete  No body
+
+=head1 SEE ALSO
+
+L<Mojolicious::Plugin::Fondation::OpenAPI>,
+L<Fondation::Model::DBIx::Async>,
+L<Mojolicious::Plugin::OpenAPI>
+
+=cut
