@@ -11,7 +11,19 @@ use Mojo::File 'path';
 sub fondation_meta {
     return {
         dependencies => ['Fondation::Model::DBIx::Async'],
-        defaults     => { backend => undef },
+        defaults     => {
+            backend           => undef,
+            fondation_init    => [
+                ['openapi', 'generate', '-y'],
+            ],
+            fondation_upgrade => [
+                ['openapi', 'generate', '-y'],
+            ],
+            fondation_clean   => [
+                'share/openapi.json',
+                'public/js/validators.js',
+            ],
+        },
     };
 }
 
