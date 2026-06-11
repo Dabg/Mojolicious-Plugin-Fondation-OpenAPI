@@ -46,8 +46,8 @@ Mojolicious::Plugin::Fondation::OpenAPI - OpenAPI specification generator and ru
 ## Plugin config
 
     'Fondation::OpenAPI' => {
-        backend => 'main',          # optional — falls back to DBIx::Async default
-        schemas => { ... },         # optional — column overrides
+        backend => 'main',          # optional -- falls back to DBIx::Async default
+        schemas => { ... },         # optional -- column overrides
     }
 
 ## Backend resolution

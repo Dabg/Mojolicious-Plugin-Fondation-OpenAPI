@@ -67,8 +67,8 @@ Swagger UI routes in development mode.
 =head2 Plugin config
 
   'Fondation::OpenAPI' => {
-      backend => 'main',          # optional — falls back to DBIx::Async default
-      schemas => { ... },         # optional — column overrides
+      backend => 'main',          # optional -- falls back to DBIx::Async default
+      schemas => { ... },         # optional -- column overrides
   }
 
 =head2 Backend resolution

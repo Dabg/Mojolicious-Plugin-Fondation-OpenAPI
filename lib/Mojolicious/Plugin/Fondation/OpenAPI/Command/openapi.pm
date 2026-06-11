@@ -229,7 +229,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         info    => {
             title       => 'Fondation API',
             version     => '1.0',
-            description => 'AUTO-GENERATED — Do not modify manually',
+            description => 'AUTO-GENERATED -- Do not modify manually',
         },
         servers    => [{url => '/api'}],
         paths      => {},
@@ -256,7 +256,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         my $col_configs  = $src_config->{columns} // {};
 
         # ------------------------------------------------------------------
-        # ÉTAPE A — Construire l'API Base
+        # ÉTAPE A -- Construire l'API Base
         # ------------------------------------------------------------------
         my %api_props;
         my @api_required;
@@ -320,7 +320,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         my @write_only_cols = grep { $api_props{$_}{writeOnly} } sort keys %api_props;
 
         # ------------------------------------------------------------------
-        # ÉTAPE B — Construire les projections contextuelles
+        # ÉTAPE B -- Construire les projections contextuelles
         # ------------------------------------------------------------------
         my %contexts;
         my @context_names = qw(create update read list);
@@ -381,7 +381,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         }
 
         # ------------------------------------------------------------------
-        # ÉTAPE C — Enregistrer les schémas
+        # ÉTAPE C -- Enregistrer les schémas
         # ------------------------------------------------------------------
         $spec->{components}{schemas}{$source_name} = $api_base;
 
@@ -391,7 +391,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         }
 
         # ------------------------------------------------------------------
-        # ÉTAPE D — Générer les paths CRUD
+        # ÉTAPE D -- Générer les paths CRUD
         # ------------------------------------------------------------------
         my $path_name = lc $source_name;
 
@@ -549,7 +549,7 @@ sub _schema_equal ($self, $props_a, $req_a, $props_b, $req_b) {
 # ---------------------------------------------------------------------------
 
 sub _get_schema_class ($self, $app, $config) {
-    # Resolve backend: explicit config → DBIx::Async default → first backend → undef
+    # Resolve backend: explicit config -> DBIx::Async default -> first backend -> undef
     my $c = $app->build_controller;
     my $backend_name;
     if ($c->has_helper('default_backend_name')) {
@@ -607,7 +607,7 @@ Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi - Generate OpenAPI spe
 Command-line interface for generating an OpenAPI 3.0.3 specification
 from DBIx::Class sources discovered via L<Fondation::Model::DBIx::Async>.
 
-No database connection is required — sources are read from the schema
+No database connection is required -- sources are read from the schema
 class metadata via C<< $schema_class->sources >>.
 
 =head1 DESIGN
@@ -635,7 +635,7 @@ C<extra-E<gt>{openapi}> annotations and plugin configuration.
 The following rules are derived automatically from DBIx structure and
 require no C<extra-E<gt>{openapi}> annotations:
 
-  DBIx                          → OpenAPI
+  DBIx                          -> OpenAPI
   ─────────────────────────────   ───────
   is_auto_increment = 1          readOnly: true
   column named created_at        readOnly: true
@@ -669,18 +669,18 @@ Result class via C<extra-E<gt>{openapi}>:
 
 =head3 Flat keys (apply to all contexts)
 
-  format      — "email", "password", "uri", etc.
-  minLength   — minimum string length
-  maxLength   — maximum string length (overrides DBIx size)
-  minimum     — minimum numeric value
-  maximum     — maximum numeric value
-  enum        — arrayref of allowed values
-  writeOnly   — boolean, field only sent in requests
-  readOnly    — boolean, field only sent in responses (overrides implicit)
-  description — human-readable description
-  type        — override the inferred OpenAPI type
-  nullable    — override the inferred nullability
-  default     — override the inferred default value
+  format      -- "email", "password", "uri", etc.
+  minLength   -- minimum string length
+  maxLength   -- maximum string length (overrides DBIx size)
+  minimum     -- minimum numeric value
+  maximum     -- maximum numeric value
+  enum        -- arrayref of allowed values
+  writeOnly   -- boolean, field only sent in requests
+  readOnly    -- boolean, field only sent in responses (overrides implicit)
+  description -- human-readable description
+  type        -- override the inferred OpenAPI type
+  nullable    -- override the inferred nullability
+  default     -- override the inferred default value
 
 =head3 Contextual keys (per-operation overrides)
 
@@ -788,11 +788,11 @@ Options:
 
 Each source generates five endpoints with C<x-mojo-to> routing:
 
-  GET    /{moniker}       → {Moniker}#list    Response: array of canonical
-  POST   /{moniker}       → {Moniker}#create  Body: {Moniker}Create or canonical
-  GET    /{moniker}/{id}  → {Moniker}#read    Response: canonical
-  PUT    /{moniker}/{id}  → {Moniker}#update  Body: {Moniker}Update or canonical
-  DELETE /{moniker}/{id}  → {Moniker}#delete  No body
+  GET    /{moniker}       -> {Moniker}#list    Response: array of canonical
+  POST   /{moniker}       -> {Moniker}#create  Body: {Moniker}Create or canonical
+  GET    /{moniker}/{id}  -> {Moniker}#read    Response: canonical
+  PUT    /{moniker}/{id}  -> {Moniker}#update  Body: {Moniker}Update or canonical
+  DELETE /{moniker}/{id}  -> {Moniker}#delete  No body
 
 =head1 SEE ALSO
 

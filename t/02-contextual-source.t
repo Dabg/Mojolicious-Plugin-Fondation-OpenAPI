@@ -51,7 +51,7 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 1. Foo — contextual: FooCreate generated, FooUpdate NOT (same as canonical)
+# 1. Foo -- contextual: FooCreate generated, FooUpdate NOT (same as canonical)
 # ==========================================================================
 
 {
@@ -67,7 +67,7 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 2. Foo canonical — password present (writeOnly) but NOT in required
+# 2. Foo canonical -- password present (writeOnly) but NOT in required
 # ==========================================================================
 
 {
@@ -88,7 +88,7 @@ sub generate_spec {
     is($props->{email}{maxLength},  200,      'email maxLength 200 (size)');
     is($props->{email}{format},     'email',  'email format email (extra openapi)');
 
-    # password — absent from canonical (writeOnly)
+    # password -- absent from canonical (writeOnly)
     ok(!exists $props->{password}, 'password absent from canonical (writeOnly)');
 
     # active, created_at, age, score
@@ -110,7 +110,7 @@ sub generate_spec {
     is($props->{name}{description}, 'Name', 'name description auto-generated');
     is($props->{id}{description},   'Id',   'id description auto-generated');
 
-    # required — password absent (writeOnly), id absent (readOnly)
+    # required -- password absent (writeOnly), id absent (readOnly)
     ok((grep { $_ eq 'name' } @$req),  'name required (NOT NULL)');
     ok((grep { $_ eq 'email' } @$req), 'email required (NOT NULL)');
     ok(!(grep { $_ eq 'password' } @$req),   'password NOT required (writeOnly excluded from canonical)');
@@ -122,7 +122,7 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 3. FooCreate — password in properties AND required
+# 3. FooCreate -- password in properties AND required
 # ==========================================================================
 
 {
@@ -145,7 +145,7 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 4. FooUpdate — password in properties, NOT in required
+# 4. FooUpdate -- password in properties, NOT in required
 # ==========================================================================
 
 {
@@ -163,32 +163,32 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 5. Foo paths — create uses FooCreate, update uses FooUpdate, others use Foo
+# 5. Foo paths -- create uses FooCreate, update uses FooUpdate, others use Foo
 # ==========================================================================
 
 {
     my $app  = build_app;
     my $spec = generate_spec($app);
 
-    # GET /foo — list: array of Foo
+    # GET /foo -- list: array of Foo
     my $list = $spec->{paths}{'/foo'}{get};
     is($list->{operationId}, 'list_foo', 'GET /foo operationId');
     my $list_items = $list->{responses}{'200'}{content}{'application/json'}{schema}{items};
     is($list_items->{'$ref'}, '#/components/schemas/Foo', 'list returns array of Foo');
 
-    # POST /foo — create: FooCreate
+    # POST /foo -- create: FooCreate
     my $create = $spec->{paths}{'/foo'}{post};
     is($create->{operationId}, 'create_foo', 'POST /foo operationId');
     is($create->{requestBody}{content}{'application/json'}{schema}{'$ref'},
         '#/components/schemas/FooCreate', 'POST /foo uses FooCreate');
 
-    # GET /foo/{id} — read: Foo
+    # GET /foo/{id} -- read: Foo
     my $read = $spec->{paths}{'/foo/{id}'}{get};
     is($read->{operationId}, 'read_foo', 'GET /foo/{id} operationId');
     is($read->{responses}{'200'}{content}{'application/json'}{schema}{'$ref'},
         '#/components/schemas/Foo', 'GET /foo/{id} uses Foo');
 
-    # PUT /foo/{id} — update: FooUpdate
+    # PUT /foo/{id} -- update: FooUpdate
     my $update = $spec->{paths}{'/foo/{id}'}{put};
     is($update->{operationId}, 'update_foo', 'PUT /foo/{id} operationId');
     is($update->{requestBody}{content}{'application/json'}{schema}{'$ref'},

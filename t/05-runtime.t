@@ -126,7 +126,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
 
     ok(defined $app->routes->find('swagger'), 'GET /swagger route exists in dev mode');
 
-    # /openapi.json route — find by scanning children (dot in name tricky for find())
+    # /openapi.json route -- find by scanning children (dot in name tricky for find())
     my $found_json = 0;
     for my $child (@{$app->routes->children}) {
         my $p = $child->pattern->unparsed // '';

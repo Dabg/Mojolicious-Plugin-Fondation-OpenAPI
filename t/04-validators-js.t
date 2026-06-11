@@ -84,7 +84,7 @@ sub generate_validators {
 }
 
 # ==========================================================================
-# 3. FooCreate validators — password required
+# 3. FooCreate validators -- password required
 # ==========================================================================
 
 {
@@ -100,7 +100,7 @@ sub generate_validators {
 }
 
 # ==========================================================================
-# 4. Bar validators — no password, no writeOnly handling needed
+# 4. Bar validators -- no password, no writeOnly handling needed
 # ==========================================================================
 
 {

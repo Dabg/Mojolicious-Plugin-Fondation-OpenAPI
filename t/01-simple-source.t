@@ -61,7 +61,7 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 1. Bar — simple source: no contextual rules → only canonical schema
+# 1. Bar -- simple source: no contextual rules → only canonical schema
 # ==========================================================================
 
 {
@@ -103,14 +103,14 @@ sub generate_spec {
 }
 
 # ==========================================================================
-# 2. Bar paths — all reference the canonical Bar schema
+# 2. Bar paths -- all reference the canonical Bar schema
 # ==========================================================================
 
 {
     my $app  = build_app;
     my $spec = generate_spec($app);
 
-    # GET /bar — list
+    # GET /bar -- list
     my $list = $spec->{paths}{'/bar'}{get};
     is($list->{operationId}, 'list_bar', 'GET /bar operationId');
     is($list->{'x-mojo-to'}, 'Bar#list', 'GET /bar x-mojo-to');
@@ -118,21 +118,21 @@ sub generate_spec {
     is($list_schema->{type}, 'array', 'list response is array');
     is($list_schema->{items}{'$ref'}, '#/components/schemas/Bar', 'array of Bar');
 
-    # POST /bar — create
+    # POST /bar -- create
     my $create = $spec->{paths}{'/bar'}{post};
     is($create->{operationId}, 'create_bar', 'POST /bar operationId');
     is($create->{'x-mojo-to'}, 'Bar#create', 'POST /bar x-mojo-to');
     is($create->{requestBody}{content}{'application/json'}{schema}{'$ref'},
         '#/components/schemas/Bar', 'POST /bar uses Bar (no BarCreate)');
 
-    # GET /bar/{id} — read
+    # GET /bar/{id} -- read
     my $read = $spec->{paths}{'/bar/{id}'}{get};
     is($read->{operationId}, 'read_bar', 'GET /bar/{id} operationId');
     is($read->{'x-mojo-to'}, 'Bar#read', 'GET /bar/{id} x-mojo-to');
     is($read->{responses}{'200'}{content}{'application/json'}{schema}{'$ref'},
         '#/components/schemas/Bar', 'GET /bar/{id} uses Bar');
 
-    # PUT /bar/{id} — update
+    # PUT /bar/{id} -- update
     my $update = $spec->{paths}{'/bar/{id}'}{put};
     is($update->{operationId}, 'update_bar', 'PUT /bar/{id} operationId');
     is($update->{'x-mojo-to'}, 'Bar#update', 'PUT /bar/{id} x-mojo-to');
