@@ -37,8 +37,6 @@ OpenAPI 3.0.3 specification from DBIx::Class sources. At runtime,
 [Mojolicious::Plugin::OpenAPI](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AOpenAPI) for request validation and adds
 Swagger UI routes in development mode.
 
-On Debian systems with recent Perl versions, installation of Mojolicious::Plugin::OpenAPI may fail because Net::IDN::Encode does not compile from CPAN. Installing the Debian package libnet-idn-encode-perl resolves the issue (see Debian bug #1065786).
-
 # NAME
 
 Mojolicious::Plugin::Fondation::OpenAPI - OpenAPI specification generator and runtime validator for Fondation applications
