@@ -70,7 +70,7 @@ sub run ($self, @args) {
 
     # Write OpenAPI spec
     $output_path->dirname->make_path;
-    $output_path->spew(encode_json($spec));
+    $output_path->spurt(encode_json($spec));
 
     my $source_count = scalar keys %{$spec->{components}{schemas}};
     say "OpenAPI spec written to $output ($source_count source(s))";
@@ -79,7 +79,7 @@ sub run ($self, @args) {
     my $validators_js = $self->_build_validators_js($spec);
     my $validators_path = $app->home->child('public', 'js', 'validators.js');
     $validators_path->dirname->make_path;
-    $validators_path->spew($validators_js);
+    $validators_path->spurt($validators_js);
     say "Client validators written to public/js/validators.js";
 }
 

@@ -58,7 +58,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
     # MUST create spec BEFORE plugin loading
     my $spec_dir = $app->home->child('share');
     $spec_dir->make_path;
-    $spec_dir->child('openapi.json')->spew(encode_json({
+    $spec_dir->child('openapi.json')->spurt(encode_json({
         openapi => '3.0.3',
         info    => { title => 'Test', version => '1.0' },
         paths   => {},
@@ -100,7 +100,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
     # MUST create spec BEFORE plugin loading
     my $spec_dir = $app->home->child('share');
     $spec_dir->make_path;
-    $spec_dir->child('openapi.json')->spew(encode_json({
+    $spec_dir->child('openapi.json')->spurt(encode_json({
         openapi => '3.0.3',
         info    => { title => 'Test', version => '1.0' },
         paths   => {},
@@ -152,7 +152,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
     # MUST create spec BEFORE plugin loading
     my $spec_dir = $app->home->child('share');
     $spec_dir->make_path;
-    $spec_dir->child('openapi.json')->spew(encode_json({
+    $spec_dir->child('openapi.json')->spurt(encode_json({
         openapi => '3.0.3',
         info    => { title => 'Test', version => '1.0' },
         paths   => {},
@@ -216,7 +216,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
 
     my $spec_file = $app->home->child('share', 'openapi.json');
     $spec_file->dirname->make_path;
-    $spec_file->spew(encode_json($spec));
+    $spec_file->spurt(encode_json($spec));
 
     # Register named routes BEFORE loading OpenAPI (plugin will discover them)
     my $r = $app->routes;
@@ -337,7 +337,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
 
     my $spec_file = $app->home->child('share', 'openapi.json');
     $spec_file->dirname->make_path;
-    $spec_file->spew(encode_json($spec));
+    $spec_file->spurt(encode_json($spec));
 
     # Register named routes BEFORE loading OpenAPI (plugin discovers them)
     my $r = $app->routes;
