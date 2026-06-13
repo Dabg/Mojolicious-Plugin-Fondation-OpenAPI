@@ -74,7 +74,9 @@ sub generate_spec {
     ok(!exists $schemas->{BarUpdate}, 'no BarUpdate (identical to canonical)');
     ok(!exists $schemas->{BarRead},   'no BarRead (identical to canonical)');
     ok(!exists $schemas->{BarList},   'no BarList (identical to canonical)');
-    is(scalar keys %$schemas, 4, 'only 4 schemas total (Bar + Foo + FooCreate + FooUpdate)');
+    ok(exists $schemas->{BarPatch},   'BarPatch exists (required differs)');
+    ok(exists $schemas->{FooPatch},   'FooPatch exists');
+    is(scalar keys %$schemas, 6, '6 schemas (Bar, BarPatch, Foo, FooCreate, FooUpdate, FooPatch)');
 
     # Bar properties
     my $bar = $schemas->{Bar};
@@ -100,7 +102,14 @@ sub generate_spec {
     ok((grep { $_ eq 'title' } @$req), 'title required (NOT NULL)');
     ok(!(grep { $_ eq 'id' } @$req),   'id NOT required (readOnly)');
     ok(!(grep { $_ eq 'body' } @$req), 'body NOT required (nullable)');
+
+    # BarPatch: required key must be absent (empty required is invalid in OpenAPI 3.0)
+    my $barpatch = $schemas->{BarPatch};
+    ok(!exists $barpatch->{required}, 'BarPatch has no required key (all fields optional)');
+    is(scalar keys %{$barpatch->{properties}}, scalar keys %{$bar->{properties}},
+        'BarPatch has same property count as Bar');
 }
+
 
 # ==========================================================================
 # 2. Bar paths -- all reference the canonical Bar schema
@@ -139,6 +148,13 @@ sub generate_spec {
     is($update->{requestBody}{content}{'application/json'}{schema}{'$ref'},
         '#/components/schemas/Bar', 'PUT /bar/{id} uses Bar (no BarUpdate)');
 
+    # PATCH /bar/{id} -- partial update
+    my $patch = $spec->{paths}{'/bar/{id}'}{patch};
+    is($patch->{operationId}, 'patch_bar', 'PATCH /bar/{id} operationId');
+    is($patch->{'x-mojo-to'}, 'Bar#update', 'PATCH /bar/{id} x-mojo-to');
+    is($patch->{requestBody}{content}{'application/json'}{schema}{'$ref'},
+        '#/components/schemas/BarPatch', 'PATCH /bar/{id} uses BarPatch');
+
     # DELETE /bar/{id}
     my $delete = $spec->{paths}{'/bar/{id}'}{delete};
     is($delete->{operationId}, 'delete_bar', 'DELETE /bar/{id} operationId');
@@ -172,6 +188,11 @@ sub generate_spec {
     my $update = $spec->{paths}{'/bar/{id}'}{put};
     is_deeply($update->{'x-auth'}, {permissions => ['bar_update']},
         'PUT /bar/{id} x-auth bar_update');
+
+    # PATCH /bar/{id} – partial update (reuses update permissions)
+    my $patch_xa = $spec->{paths}{'/bar/{id}'}{patch};
+    is_deeply($patch_xa->{'x-auth'}, {permissions => ['bar_update']},
+        'PATCH /bar/{id} x-auth bar_update (reuses update)');
 
     # DELETE /bar/{id}
     my $delete = $spec->{paths}{'/bar/{id}'}{delete};

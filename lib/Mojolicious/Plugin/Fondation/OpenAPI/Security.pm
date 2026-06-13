@@ -16,8 +16,8 @@ sub register ($self, $app, $config) {
 
             my $op_spec = $c->openapi->spec || {};
             my $x_auth  = $op_spec->{'x-auth'} || {};
-            $c->app->log->info('[Security] op_spec keys: ' . join(', ', sort keys %$op_spec));
-            $c->app->log->info('[Security] x-auth: ' . $c->dumper($x_auth));
+            #$c->app->log->info('[Security] op_spec keys: ' . join(', ', sort keys %$op_spec));
+            #$c->app->log->info('[Security] x-auth: ' . $c->dumper($x_auth));
 
             # No x-auth → public endpoint
             return 1 unless %$x_auth;

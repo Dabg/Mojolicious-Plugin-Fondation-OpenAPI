@@ -256,7 +256,15 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         my $col_configs  = $src_config->{columns} // {};
 
         # ------------------------------------------------------------------
-        # ÉTAPE A -- Construire l'API Base
+        # STEP A -- Build the API Base (canonical schema)
+        #
+        # Three-layer cascade, highest priority wins:
+        #   1. DBIx structure    (implicit: data_type, size, is_nullable, ...)
+        #   2. extra->{openapi}  (flat keys declared in Result class)
+        #   3. Config override   (flat keys in myapp.conf)
+        #
+        # After the cascade, writeOnly columns are stripped from the
+        # API Base — they only appear in create/update/patch contexts.
         # ------------------------------------------------------------------
         my %api_props;
         my @api_required;
@@ -267,7 +275,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             my $cfg     = $col_configs->{$col} // {};
             my %prop;
 
-            # --- Niveau 1: Structure DBIx (implicite) ---
+            # --- Level 1: DBIx structure (implicit) ---
             $prop{type}      = $self->_resolve_type($info);
             $prop{maxLength} = int($info->{size})
                 if $prop{type} eq 'string' && defined $info->{size};
@@ -283,10 +291,10 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             $prop{format}   = 'float'      if $info->{data_type} =~ /^float$/i;
             $prop{format}   = 'double'     if $info->{data_type} =~ /^double$/i;
 
-            # --- Niveau 2: extra->{openapi} clés plates ---
+            # --- Level 2: extra->{openapi} flat keys ---
             $self->_apply_openapi_flat(\%prop, $openapi);
 
-            # --- Niveau 3: Config override clés plates ---
+            # --- Level 3: Config override flat keys ---
             $self->_apply_openapi_flat(\%prop, $cfg);
 
             # Description fallback
@@ -320,19 +328,31 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         my @write_only_cols = grep { $api_props{$_}{writeOnly} } sort keys %api_props;
 
         # ------------------------------------------------------------------
-        # ÉTAPE B -- Construire les projections contextuelles
+        # STEP B -- Build contextual projections
+        #
+        # For each CRUD context (create, update, read, list, patch),
+        # start from the API Base and apply context-specific rules:
+        #   - create/update/patch: re-inject writeOnly columns (e.g. password)
+        #   - PATCH: nothing required by default (partial update)
+        #   - extra->{openapi}->{context}->{required} overrides
+        #   - Config contextual overrides
+        #
+        # A contextual schema is only emitted when it differs from the
+        # API Base (different properties or different required array).
         # ------------------------------------------------------------------
         my %contexts;
-        my @context_names = qw(create update read list);
+        my @context_names = qw(create update read list patch);
 
         for my $ctx_name (@context_names) {
-            my $ctx_required = [@api_required];
+            # PATCH: nothing required by default (partial update)
+            # All field-level constraints (minLength, pattern, ...) still apply
+            my $ctx_required = $ctx_name eq 'patch' ? [] : [@api_required];
 
             # Start with API Base properties
             my %ctx_props = %api_base_props;
 
-            # create/update: add writeOnly properties
-            if ($ctx_name eq 'create' || $ctx_name eq 'update') {
+            # create/update/patch: add writeOnly properties
+            if ($ctx_name eq 'create' || $ctx_name eq 'update' || $ctx_name eq 'patch') {
                 for my $wcol (@write_only_cols) {
                     $ctx_props{$wcol} = $api_props{$wcol};
                 }
@@ -370,18 +390,24 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                 \%ctx_props, $ctx_required,
                 \%api_base_props, \@api_required
             )) {
-                $contexts{$ctx_name} = {
+                my %schema = (
                     type        => 'object',
                     title       => "$source_name ($ctx_name)",
                     description => "Schema for $ctx_name on $source_name",
                     properties  => \%ctx_props,
-                    required    => $ctx_required,
-                };
+                );
+                $schema{required} = $ctx_required if @$ctx_required;
+                $contexts{$ctx_name} = \%schema;
             }
         }
 
         # ------------------------------------------------------------------
-        # ÉTAPE C -- Enregistrer les schémas
+        # STEP C -- Register schemas in the OpenAPI spec
+        #
+        # Store the API Base under its moniker (e.g. "User"), plus any
+        # contextual schemas that differ from it (e.g. "UserCreate",
+        # "UserUpdate"). Contextual schema keys use the PascalCase
+        # notation: "${source_name}${Context}".
         # ------------------------------------------------------------------
         $spec->{components}{schemas}{$source_name} = $api_base;
 
@@ -391,7 +417,19 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         }
 
         # ------------------------------------------------------------------
-        # ÉTAPE D -- Générer les paths CRUD
+        # STEP D -- Generate CRUD paths
+        #
+        # Five REST endpoints per source with automatic x-mojo-to
+        # routing and x-auth permission annotations:
+        #   GET    /{moniker}       → list    (x-auth: {moniker}_list)
+        #   POST   /{moniker}       → create  (x-auth: {moniker}_create)
+        #   GET    /{moniker}/{id}  → read    (x-auth: {moniker}_read)
+        #   PUT    /{moniker}/{id}  → update  (x-auth: {moniker}_update)
+        #   PATCH  /{moniker}/{id}  → update  (same x-auth as PUT)
+        #   DELETE /{moniker}/{id}  → delete  (x-auth: {moniker}_delete)
+        #
+        # Each operation references the appropriate contextual schema
+        # when available, falling back to the API Base otherwise.
         # ------------------------------------------------------------------
         my $path_name = lc $source_name;
 
@@ -487,6 +525,21 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                     content  => {
                         'application/json' => {
                             schema => {'$ref' => $schema_ref->('update')},
+                        },
+                    },
+                },
+                responses   => {'200' => {description => 'Success'}},
+                'x-mojo-to' => "$controller#update",
+            },
+            patch => {
+                summary     => "Partially update a $path_name by ID",
+                operationId => "patch_$path_name",
+                %{ $maybe_x_auth->('update') // {} },
+                requestBody => {
+                    required => true,
+                    content  => {
+                        'application/json' => {
+                            schema => {'$ref' => $schema_ref->('patch')},
                         },
                     },
                 },

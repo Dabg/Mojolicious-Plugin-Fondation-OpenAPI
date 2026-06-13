@@ -73,13 +73,15 @@ sub generate_validators {
     my $js  = generate_validators($app);
 
     my @schemas = $js =~ /FondationSchemas\['([^']+)'\]/g;
-    is(scalar @schemas, 4, '4 schemas in validators.js');
+    is(scalar @schemas, 6, '6 schemas in validators.js');
 
     my %seen = map { $_ => 1 } @schemas;
     ok($seen{Bar},       'Bar in validators');
     ok($seen{Foo},       'Foo in validators');
     ok($seen{FooCreate}, 'FooCreate in validators');
     ok($seen{FooUpdate}, 'FooUpdate in validators');
+    ok($seen{FooPatch},  'FooPatch in validators');
+    ok($seen{BarPatch},  'BarPatch in validators');
     ok(!$seen{BarCreate}, 'no BarCreate in validators');
 }
 
