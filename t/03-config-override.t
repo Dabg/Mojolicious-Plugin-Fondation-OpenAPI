@@ -174,4 +174,52 @@ sub generate_spec {
     ok(!exists $schemas->{BarCreate}, 'no BarCreate without config override');
 }
 
+# ==========================================================================
+# 6. x-auth config override
+# ==========================================================================
+
+{
+    my $app = build_app({
+        schemas => {
+            Foo => {
+                x_auth => {
+                    create => {
+                        permissions => ['admin_create_foo'],
+                        groups      => ['admins'],
+                    },
+                    list => {
+                        permissions => [],    # public endpoint
+                    },
+                },
+            },
+        },
+    });
+
+    my $spec = generate_spec($app);
+
+    # Override: create gets custom permissions + groups
+    my $foo_create = $spec->{paths}{'/foo'}{post};
+    is_deeply($foo_create->{'x-auth'},
+        {permissions => ['admin_create_foo'], groups => ['admins']},
+        'x-auth create overridden from config');
+
+    # Override: list is public (empty permissions → x-auth absent)
+    my $foo_list = $spec->{paths}{'/foo'}{get};
+    ok(!exists $foo_list->{'x-auth'},
+        'x-auth absent for public endpoint (permissions: [])');
+
+    # Default: read/update/delete still use convention
+    my $foo_read = $spec->{paths}{'/foo/{id}'}{get};
+    is_deeply($foo_read->{'x-auth'}, {permissions => ['foo_read']},
+        'x-auth read uses default convention');
+
+    my $foo_update = $spec->{paths}{'/foo/{id}'}{put};
+    is_deeply($foo_update->{'x-auth'}, {permissions => ['foo_update']},
+        'x-auth update uses default convention');
+
+    my $foo_delete = $spec->{paths}{'/foo/{id}'}{delete};
+    is_deeply($foo_delete->{'x-auth'}, {permissions => ['foo_delete']},
+        'x-auth delete uses default convention');
+}
+
 done_testing;

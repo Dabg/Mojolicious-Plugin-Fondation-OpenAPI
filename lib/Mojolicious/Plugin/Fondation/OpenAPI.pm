@@ -10,7 +10,8 @@ use Mojo::File 'path';
 
 sub fondation_meta {
     return {
-        dependencies => ['Fondation::Model::DBIx::Async'],
+        dependencies      => ['Fondation::Model::DBIx::Async'],
+        provides_actions  => ['OpenAPIRoutes'],
         defaults     => {
             backend           => undef,
             fondation_init    => [
@@ -91,6 +92,33 @@ Any column property can be overridden via C<schemas> without modifying
 DBIx Result classes. See L<Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi>
 for the full list of supported keys.
 
+=head2 x-auth config override
+
+Permission annotations on CRUD endpoints can be overridden via C<x_auth>
+in the C<schemas> config. The default convention is
+C<{moniker_lc}_{operation}> (e.g., C<user_create>, C<group_list>).
+
+  'Fondation::OpenAPI' => {
+      schemas => {
+          User => {
+              x_auth => {
+                  create => {
+                      permissions => ['admin_create_user'],
+                      groups      => ['admins'],
+                  },
+                  list => {
+                      permissions => [],   # public endpoint
+                  },
+              },
+          },
+      },
+  },
+
+Overrides replace the default entirely. An empty C<permissions> array
+makes the endpoint public (no C<x-auth> in the generated spec).
+Additional constraint keys (C<groups>, C<features>, etc.) are supported
+by the L<Mojolicious::Plugin::Fondation::OpenAPI::Security> sub-plugin.
+
 =head1 DEPENDENCIES
 
 This plugin requires L<Fondation::Model::DBIx::Async>.
@@ -164,7 +192,13 @@ sub fondation_finalyze ($self, $app, $long_name) {
     }
 
     # Load the OpenAPI plugin with the generated spec
-    $app->plugin(OpenAPI => { url => $spec_file->to_string });
+    $app->plugin(OpenAPI => {
+        url     => $spec_file->to_string,
+        plugins => [
+            '+Security',
+            'Mojolicious::Plugin::Fondation::OpenAPI::Security',
+        ],
+    });
     $self->log->debug("OpenAPI plugin loaded from $spec_file");
 
     # Swagger UI in development mode

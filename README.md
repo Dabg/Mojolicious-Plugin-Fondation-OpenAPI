@@ -64,6 +64,33 @@ Any column property can be overridden via `schemas` without modifying
 DBIx Result classes. See [Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AFondation%3A%3AOpenAPI%3A%3ACommand%3A%3Aopenapi)
 for the full list of supported keys.
 
+## x-auth config override
+
+Permission annotations on CRUD endpoints can be overridden via `x_auth`
+in the `schemas` config. The default convention is
+`{moniker_lc}_{operation}` (e.g., `user_create`, `group_list`).
+
+    'Fondation::OpenAPI' => {
+        schemas => {
+            User => {
+                x_auth => {
+                    create => {
+                        permissions => ['admin_create_user'],
+                        groups      => ['admins'],
+                    },
+                    list => {
+                        permissions => [],   # public endpoint
+                    },
+                },
+            },
+        },
+    },
+
+Overrides replace the default entirely. An empty `permissions` array
+makes the endpoint public (no `x-auth` in the generated spec).
+Additional constraint keys (`groups`, `features`, etc.) are supported
+by the [Mojolicious::Plugin::Fondation::OpenAPI::Security](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AFondation%3A%3AOpenAPI%3A%3ASecurity) sub-plugin.
+
 # DEPENDENCIES
 
 This plugin requires [Fondation::Model::DBIx::Async](https://metacpan.org/pod/Fondation%3A%3AModel%3A%3ADBIx%3A%3AAsync).

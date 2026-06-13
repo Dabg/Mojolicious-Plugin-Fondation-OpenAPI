@@ -141,8 +141,8 @@ window.FondationValidators = {
             var rules = schema.properties[prop];
             var val   = data[prop];
 
-            // Skip writeOnly fields (e.g. password in request bodies)
-            if (rules.writeOnly) continue;
+            // Skip readOnly fields (server-managed, not in forms)
+            if (rules.readOnly) continue;
 
             // Required check (skip readOnly -- server-managed)
             if (rules.required && !rules.readOnly) {
@@ -403,11 +403,28 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                 : "#/components/schemas/$source_name";
         };
 
+        # Build x-auth for each CRUD operation
+        my $x_auth = {
+            list   => $self->_build_x_auth($src_config, $controller, 'list'),
+            create => $self->_build_x_auth($src_config, $controller, 'create'),
+            read   => $self->_build_x_auth($src_config, $controller, 'read'),
+            update => $self->_build_x_auth($src_config, $controller, 'update'),
+            delete => $self->_build_x_auth($src_config, $controller, 'delete'),
+        };
+
+        # Helper: return x-auth wrapped in hashref only if non-empty
+        my $maybe_x_auth = sub ($op) {
+            my $xa = $x_auth->{$op};
+            return unless $xa && %$xa;
+            return {'x-auth' => $xa};
+        };
+
         # Collection paths
         $spec->{paths}{"/$path_name"} = {
             get => {
                 summary     => "List all $path_name",
                 operationId => "list_$path_name",
+                %{ $maybe_x_auth->('list') // {} },
                 responses   => {
                     '200' => {
                         description => 'Success',
@@ -426,6 +443,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             post => {
                 summary     => "Create a new $path_name",
                 operationId => "create_$path_name",
+                %{ $maybe_x_auth->('create') // {} },
                 requestBody => {
                     required => true,
                     content  => {
@@ -447,6 +465,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             get => {
                 summary     => "Get a $path_name by ID",
                 operationId => "read_$path_name",
+                %{ $maybe_x_auth->('read') // {} },
                 responses   => {
                     '200' => {
                         description => 'Success',
@@ -462,6 +481,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             put => {
                 summary     => "Update a $path_name by ID",
                 operationId => "update_$path_name",
+                %{ $maybe_x_auth->('update') // {} },
                 requestBody => {
                     required => true,
                     content  => {
@@ -476,9 +496,20 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             delete => {
                 summary     => "Delete a $path_name by ID",
                 operationId => "delete_$path_name",
+                %{ $maybe_x_auth->('delete') // {} },
                 responses   => {'204' => {description => 'Deleted'}},
                 'x-mojo-to' => "$controller#delete",
             },
+        };
+    }
+
+    # ── Merge custom routes from plugins (share/routes.yaml) ─────────
+    my $custom_routes = $app->{openapi_routes} // {};
+    for my $path (sort keys %$custom_routes) {
+        my $ops = $custom_routes->{$path};
+        $spec->{paths}{$path} = {
+            %{ $spec->{paths}{$path} // {} },
+            %$ops,
         };
     }
 
@@ -542,6 +573,29 @@ sub _schema_equal ($self, $props_a, $req_a, $props_b, $req_b) {
     }
 
     return 1;
+}
+
+# ---------------------------------------------------------------------------
+# Build x-auth from convention + config override
+# ---------------------------------------------------------------------------
+
+sub _build_x_auth ($self, $src_config, $moniker, $operation) {
+    # Config override: schemas.{Source}.x_auth.{operation}
+    my $override = $src_config->{x_auth}{$operation};
+
+    if (defined $override) {
+        # Normalize: empty permissions + no other constraints → no x-auth
+        my $perms = $override->{permissions};
+        return {}
+            unless ($perms && @$perms)
+                || grep { $_ ne 'permissions' } keys %$override;
+        return $override;
+    }
+
+    # Default convention: {moniker_lc}_{operation}
+    return {
+        permissions => [lc($moniker) . "_$operation"],
+    };
 }
 
 # ---------------------------------------------------------------------------
@@ -786,13 +840,19 @@ Options:
 
 =head1 CRUD PATHS
 
-Each source generates five endpoints with C<x-mojo-to> routing:
+Each source generates five endpoints with C<x-mojo-to> routing and
+automatic C<x-auth> permission annotations:
 
-  GET    /{moniker}       -> {Moniker}#list    Response: array of canonical
-  POST   /{moniker}       -> {Moniker}#create  Body: {Moniker}Create or canonical
-  GET    /{moniker}/{id}  -> {Moniker}#read    Response: canonical
-  PUT    /{moniker}/{id}  -> {Moniker}#update  Body: {Moniker}Update or canonical
-  DELETE /{moniker}/{id}  -> {Moniker}#delete  No body
+  GET    /{moniker}       -> {Moniker}#list    x-auth: {moniker_lc}_list
+  POST   /{moniker}       -> {Moniker}#create  x-auth: {moniker_lc}_create
+  GET    /{moniker}/{id}  -> {Moniker}#read    x-auth: {moniker_lc}_read
+  PUT    /{moniker}/{id}  -> {Moniker}#update  x-auth: {moniker_lc}_update
+  DELETE /{moniker}/{id}  -> {Moniker}#delete  x-auth: {moniker_lc}_delete
+
+The C<x-auth> default can be overridden via the plugin config
+(C<schemas.{Source}.x_auth.{operation}>). See L<Mojolicious::Plugin::Fondation::OpenAPI>
+for details. Enforcement is handled at runtime by
+L<Mojolicious::Plugin::Fondation::OpenAPI::Security>.
 
 =head1 SEE ALSO
 

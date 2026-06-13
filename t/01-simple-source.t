@@ -145,4 +145,38 @@ sub generate_spec {
     is($delete->{'x-mojo-to'}, 'Bar#delete', 'DELETE /bar/{id} x-mojo-to');
 }
 
+# ==========================================================================
+# 3. Bar x-auth – default convention {moniker_lc}_{operation}
+# ==========================================================================
+
+{
+    my $app  = build_app;
+    my $spec = generate_spec($app);
+
+    # GET /bar – list
+    my $list = $spec->{paths}{'/bar'}{get};
+    is_deeply($list->{'x-auth'}, {permissions => ['bar_list']},
+        'GET /bar x-auth bar_list');
+
+    # POST /bar – create
+    my $create = $spec->{paths}{'/bar'}{post};
+    is_deeply($create->{'x-auth'}, {permissions => ['bar_create']},
+        'POST /bar x-auth bar_create');
+
+    # GET /bar/{id} – read
+    my $read = $spec->{paths}{'/bar/{id}'}{get};
+    is_deeply($read->{'x-auth'}, {permissions => ['bar_read']},
+        'GET /bar/{id} x-auth bar_read');
+
+    # PUT /bar/{id} – update
+    my $update = $spec->{paths}{'/bar/{id}'}{put};
+    is_deeply($update->{'x-auth'}, {permissions => ['bar_update']},
+        'PUT /bar/{id} x-auth bar_update');
+
+    # DELETE /bar/{id}
+    my $delete = $spec->{paths}{'/bar/{id}'}{delete};
+    is_deeply($delete->{'x-auth'}, {permissions => ['bar_delete']},
+        'DELETE /bar/{id} x-auth bar_delete');
+}
+
 done_testing;
