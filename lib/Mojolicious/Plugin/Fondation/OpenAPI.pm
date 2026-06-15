@@ -28,10 +28,6 @@ sub fondation_meta {
     };
 }
 
-=head1 NAME
-
-Mojolicious::Plugin::Fondation::OpenAPI - OpenAPI specification generator and runtime validator for Fondation applications
-
 =head1 SYNOPSIS
 
   # In myapp.conf

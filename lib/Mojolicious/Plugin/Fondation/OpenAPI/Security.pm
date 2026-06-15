@@ -65,10 +65,6 @@ sub _forbidden ($self, $c, $message) {
 
 =encoding utf8
 
-=head1 NAME
-
-Mojolicious::Plugin::Fondation::OpenAPI::Security - Authorization enforcement for OpenAPI routes via x-auth
-
 =head1 DESCRIPTION
 
 This is an OpenAPI sub-plugin (loaded via the C<plugins> option of
