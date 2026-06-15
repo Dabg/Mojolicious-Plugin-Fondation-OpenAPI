@@ -239,20 +239,20 @@ sub _build_spec ($self, $schema_class, $app, $config) {
     # Config overrides: schemas => { Source => { columns => { Col => {...} } } }
     my $schemas_config = $config->{schemas} // {};
 
-    my %seen;
+    # Build lookup: table_name → Result class from all plugins' registry
+    my %result_classes;
+    for my $entry (values %{$app->fondation->registry}) {
+        next unless $entry->{dbic} && $entry->{dbic}{result_classes};
+        %result_classes = (%result_classes, %{$entry->{dbic}{result_classes}});
+    }
 
-    for my $source_name ($schema_class->sources) {
-        # Only process monikers (e.g. 'Foo'), not table names ('foos')
-        next unless $source_name =~ /^[A-Z]/;
+    for my $table_name ($schema_class->sources) {
 
-        my $source = $schema_class->source($source_name);
-        my $table  = $source->name;
-
-        next if $seen{$table}++;
-
+        my $source     = $schema_class->source($table_name);
         my $columns_info = $source->columns_info;
-        my $controller   = $source_name;
-        my $src_config   = $schemas_config->{$source_name} // {};
+        my $resultname   = $self->_extract_name($result_classes{$table_name});
+        my $src_config   = $schemas_config->{$table_name}
+                        // $schemas_config->{$resultname} // {};
         my $col_configs  = $src_config->{columns} // {};
 
         # ------------------------------------------------------------------
@@ -318,8 +318,8 @@ sub _build_spec ($self, $schema_class, $app, $config) {
 
         my $api_base = {
             type        => 'object',
-            title       => $source_name,
-            description => "Schema for $source_name",
+            title       => $resultname,
+            description => "Schema for $resultname",
             properties  => \%api_base_props,
             required    => \@api_required,
         };
@@ -392,8 +392,8 @@ sub _build_spec ($self, $schema_class, $app, $config) {
             )) {
                 my %schema = (
                     type        => 'object',
-                    title       => "$source_name ($ctx_name)",
-                    description => "Schema for $ctx_name on $source_name",
+                    title       => "$resultname ($ctx_name)",
+                    description => "Schema for $ctx_name on $resultname",
                     properties  => \%ctx_props,
                 );
                 $schema{required} = $ctx_required if @$ctx_required;
@@ -407,13 +407,13 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         # Store the API Base under its moniker (e.g. "User"), plus any
         # contextual schemas that differ from it (e.g. "UserCreate",
         # "UserUpdate"). Contextual schema keys use the PascalCase
-        # notation: "${source_name}${Context}".
+        # notation: "${resultname}${Context}".
         # ------------------------------------------------------------------
-        $spec->{components}{schemas}{$source_name} = $api_base;
+        $spec->{components}{schemas}{$resultname} = $api_base;
 
         for my $ctx_name (@context_names) {
             next unless $contexts{$ctx_name};
-            $spec->{components}{schemas}{"${source_name}\u$ctx_name"} = $contexts{$ctx_name};
+            $spec->{components}{schemas}{"${resultname}\u$ctx_name"} = $contexts{$ctx_name};
         }
 
         # ------------------------------------------------------------------
@@ -431,23 +431,23 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         # Each operation references the appropriate contextual schema
         # when available, falling back to the API Base otherwise.
         # ------------------------------------------------------------------
-        my $path_name = lc $source_name;
+        my $path_name = lc $resultname;
 
         # Helper: resolve schema ref for a context
         my $schema_ref = sub ($ctx) {
-            my $key = "${source_name}\u$ctx";
+            my $key = "${resultname}\u$ctx";
             return $contexts{$ctx}
                 ? "#/components/schemas/$key"
-                : "#/components/schemas/$source_name";
+                : "#/components/schemas/$resultname";
         };
 
         # Build x-auth for each CRUD operation
         my $x_auth = {
-            list   => $self->_build_x_auth($src_config, $controller, 'list'),
-            create => $self->_build_x_auth($src_config, $controller, 'create'),
-            read   => $self->_build_x_auth($src_config, $controller, 'read'),
-            update => $self->_build_x_auth($src_config, $controller, 'update'),
-            delete => $self->_build_x_auth($src_config, $controller, 'delete'),
+            list   => $self->_build_x_auth($src_config, $resultname, 'list'),
+            create => $self->_build_x_auth($src_config, $resultname, 'create'),
+            read   => $self->_build_x_auth($src_config, $resultname, 'read'),
+            update => $self->_build_x_auth($src_config, $resultname, 'update'),
+            delete => $self->_build_x_auth($src_config, $resultname, 'delete'),
         };
 
         # Helper: return x-auth wrapped in hashref only if non-empty
@@ -476,7 +476,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                         },
                     },
                 },
-                'x-mojo-to' => "$controller#list",
+                'x-mojo-to' => "$resultname#list",
             },
             post => {
                 summary     => "Create a new $path_name",
@@ -491,7 +491,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                     },
                 },
                 responses  => {'201' => {description => 'Created'}},
-                'x-mojo-to' => "$controller#create",
+                'x-mojo-to' => "$resultname#create",
             },
         };
 
@@ -514,7 +514,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                         },
                     },
                 },
-                'x-mojo-to' => "$controller#read",
+                'x-mojo-to' => "$resultname#read",
             },
             put => {
                 summary     => "Update a $path_name by ID",
@@ -529,7 +529,7 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                     },
                 },
                 responses   => {'200' => {description => 'Success'}},
-                'x-mojo-to' => "$controller#update",
+                'x-mojo-to' => "$resultname#update",
             },
             patch => {
                 summary     => "Partially update a $path_name by ID",
@@ -544,14 +544,14 @@ sub _build_spec ($self, $schema_class, $app, $config) {
                     },
                 },
                 responses   => {'200' => {description => 'Success'}},
-                'x-mojo-to' => "$controller#update",
+                'x-mojo-to' => "$resultname#update",
             },
             delete => {
                 summary     => "Delete a $path_name by ID",
                 operationId => "delete_$path_name",
                 %{ $maybe_x_auth->('delete') // {} },
                 responses   => {'204' => {description => 'Deleted'}},
-                'x-mojo-to' => "$controller#delete",
+                'x-mojo-to' => "$resultname#delete",
             },
         };
     }
@@ -632,7 +632,7 @@ sub _schema_equal ($self, $props_a, $req_a, $props_b, $req_b) {
 # Build x-auth from convention + config override
 # ---------------------------------------------------------------------------
 
-sub _build_x_auth ($self, $src_config, $moniker, $operation) {
+sub _build_x_auth ($self, $src_config, $resultname, $operation) {
     # Config override: schemas.{Source}.x_auth.{operation}
     my $override = $src_config->{x_auth}{$operation};
 
@@ -647,7 +647,7 @@ sub _build_x_auth ($self, $src_config, $moniker, $operation) {
 
     # Default convention: {moniker_lc}_{operation}
     return {
-        permissions => [lc($moniker) . "_$operation"],
+        permissions => [lc($resultname) . "_$operation"],
     };
 }
 
@@ -689,6 +689,18 @@ sub _get_schema_class ($self, $app, $config) {
         or die "Cannot load schema class $schema_class: $@\n";
 
     return $schema_class;
+}
+
+# ---------------------------------------------------------------------------
+# Extract CamelCase name from Result class
+#   Mojolicious::...::Result::Foo → Foo
+#   Mojolicious::...::Result::UserGroup → UserGroup
+# ---------------------------------------------------------------------------
+
+sub _extract_name ($self, $result_class) {
+    return undef unless $result_class;
+    my ($name) = $result_class =~ /::Result::([^:]+)$/;
+    return $name;
 }
 
 1;
