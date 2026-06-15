@@ -6,11 +6,13 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
 sub fondation_meta {
     return {
-        dependencies => ['Fondation::Model::DBIx::Async'],
+        dependencies     => ['Fondation::Model::DBIx::Async'],
         defaults     => {
-            models => {
+            openapi_exclude => ['bazs'],
+            models          => {
                 foo => {source => 'foos', backend => 'test'},
                 bar => {source => 'bars', backend => 'test'},
+                baz => {source => 'bazs', backend => 'test'},
             },
         },
     };

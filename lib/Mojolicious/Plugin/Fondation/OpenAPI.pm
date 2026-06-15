@@ -115,6 +115,32 @@ makes the endpoint public (no C<x-auth> in the generated spec).
 Additional constraint keys (C<groups>, C<features>, etc.) are supported
 by the L<Mojolicious::Plugin::Fondation::OpenAPI::Security> sub-plugin.
 
+=head2 openapi_exclude in plugin C<fondation_meta>
+
+Plugins can declare tables that should be excluded from the generated
+OpenAPI spec via C<openapi_exclude> in their C<fondation_meta>. This
+is the canonical way to hide internal tables (pivot tables, audit logs,
+etc.) that should never be exposed as public API endpoints.
+
+  # In any Fondation plugin's fondation_meta:
+  sub fondation_meta {
+      return {
+          defaults => {
+              openapi_exclude => ['user_group'],
+          },
+      };
+  }
+
+Each entry is a DBIx::Class source name (table name, e.g. C<user_group>),
+not the PascalCase Result class name. Excluded sources produce no CRUD
+routes, no OpenAPI schemas, and no C<public/js/validators.js> entries.
+
+B<Design:> The mechanism lives in plugin C<fondation_meta> rather than
+in the OpenAPI plugin config because the plugin that owns the table
+knows best whether it should be exposed. This follows the Fondation
+principle of self-contained bricks — the OpenAPI plugin only reads
+what other plugins declare.
+
 =head1 DEPENDENCIES
 
 This plugin requires L<Fondation::Model::DBIx::Async>.

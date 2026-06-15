@@ -246,6 +246,13 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         %result_classes = (%result_classes, %{$entry->{dbic}{result_classes}});
     }
 
+    # Collect openapi_exclude from all plugins' config
+    my %openapi_exclude;
+    for my $entry (values %{$app->fondation->registry}) {
+        my $excl = $entry->{config}{openapi_exclude} // [];
+        $openapi_exclude{$_} = 1 for @$excl;
+    }
+
     for my $table_name ($schema_class->sources) {
 
         my $source     = $schema_class->source($table_name);
@@ -254,6 +261,9 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         my $src_config   = $schemas_config->{$table_name}
                         // $schemas_config->{$resultname} // {};
         my $col_configs  = $src_config->{columns} // {};
+
+        # Skip sources excluded by plugins
+        next if $openapi_exclude{$table_name};
 
         # ------------------------------------------------------------------
         # STEP A -- Build the API Base (canonical schema)

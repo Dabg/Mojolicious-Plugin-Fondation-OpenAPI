@@ -37,10 +37,6 @@ OpenAPI 3.0.3 specification from DBIx::Class sources. At runtime,
 [Mojolicious::Plugin::OpenAPI](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AOpenAPI) for request validation and adds
 Swagger UI routes in development mode.
 
-# NAME
-
-Mojolicious::Plugin::Fondation::OpenAPI - OpenAPI specification generator and runtime validator for Fondation applications
-
 # CONFIGURATION
 
 ## Plugin config
