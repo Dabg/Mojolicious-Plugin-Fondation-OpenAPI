@@ -80,16 +80,64 @@ in the `schemas` config. The default convention is
                 },
             },
         },
-    },
+    }
 
 Overrides replace the default entirely. An empty `permissions` array
 makes the endpoint public (no `x-auth` in the generated spec).
 Additional constraint keys (`groups`, `features`, etc.) are supported
 by the [Mojolicious::Plugin::Fondation::OpenAPI::Security](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AFondation%3A%3AOpenAPI%3A%3ASecurity) sub-plugin.
 
+## openapi\_exclude in plugin `fondation_meta`
+
+Plugins can declare tables that should be excluded from the generated
+OpenAPI spec via `openapi_exclude` in their `fondation_meta`. This
+is the canonical way to hide internal tables (pivot tables, audit logs,
+etc.) that should never be exposed as public API endpoints.
+
+    # In any Fondation plugin's fondation_meta:
+    sub fondation_meta {
+        return {
+            defaults => {
+                openapi_exclude => ['user_group'],
+            },
+        };
+    }
+
+Each entry is a DBIx::Class source name (table name, e.g. `user_group`),
+not the PascalCase Result class name. Excluded sources produce no CRUD
+routes, no OpenAPI schemas, and no `public/js/validators.js` entries.
+
+**Design:** The mechanism lives in plugin `fondation_meta` rather than
+in the OpenAPI plugin config because the plugin that owns the table
+knows best whether it should be exposed. This follows the Fondation
+principle of self-contained bricks — the OpenAPI plugin only reads
+what other plugins declare.
+
 # DEPENDENCIES
 
 This plugin requires [Fondation::Model::DBIx::Async](https://metacpan.org/pod/Fondation%3A%3AModel%3A%3ADBIx%3A%3AAsync).
+
+Transitively, it depends on [Mojolicious::Plugin::OpenAPI](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AOpenAPI) >= 5.12,
+which requires [JSON::Validator](https://metacpan.org/pod/JSON%3A%3AValidator) >= 5.17.
+
+## Perl 5.40 Incompatibility
+
+On Perl >= 5.40, [Net::IDN::Encode](https://metacpan.org/pod/Net%3A%3AIDN%3A%3AEncode) (a dependency of JSON::Validator
+5.17+) fails to compile because its XS code calls `uvuni_to_utf8_flags`,
+removed from the Perl C API in 5.40. This cascades:
+
+    Net::IDN::Encode → compile FAIL (Perl ≥ 5.40)
+      → JSON::Validator 5.17+ → blocked by cpanm
+        → Mojolicious::Plugin::OpenAPI 5.12 → blocked
+          → Fondation::OpenAPI → blocked
+
+JSON::Validator only uses Net::IDN::Encode for hostname validation
+(optional, not needed by Fondation).
+
+**Workaround on Debian:** the `libnet-idn-encode-perl` package provides
+a pre-compiled version that works on Perl 5.40:
+
+    apt install libnet-idn-encode-perl
 
 # COMMANDS
 

@@ -108,7 +108,7 @@ C<{moniker_lc}_{operation}> (e.g., C<user_create>, C<group_list>).
               },
           },
       },
-  },
+  }
 
 Overrides replace the default entirely. An empty C<permissions> array
 makes the endpoint public (no C<x-auth> in the generated spec).
@@ -144,6 +144,28 @@ what other plugins declare.
 =head1 DEPENDENCIES
 
 This plugin requires L<Fondation::Model::DBIx::Async>.
+
+Transitively, it depends on L<Mojolicious::Plugin::OpenAPI> E<gt>= 5.12,
+which requires L<JSON::Validator> E<gt>= 5.17.
+
+=head2 Perl 5.40 Incompatibility
+
+On Perl E<gt>= 5.40, L<Net::IDN::Encode> (a dependency of JSON::Validator
+5.17+) fails to compile because its XS code calls C<uvuni_to_utf8_flags>,
+removed from the Perl C API in 5.40. This cascades:
+
+  Net::IDN::Encode → compile FAIL (Perl ≥ 5.40)
+    → JSON::Validator 5.17+ → blocked by cpanm
+      → Mojolicious::Plugin::OpenAPI 5.12 → blocked
+        → Fondation::OpenAPI → blocked
+
+JSON::Validator only uses Net::IDN::Encode for hostname validation
+(optional, not needed by Fondation).
+
+B<Workaround on Debian:> the C<libnet-idn-encode-perl> package provides
+a pre-compiled version that works on Perl 5.40:
+
+  apt install libnet-idn-encode-perl
 
 =head1 COMMANDS
 
