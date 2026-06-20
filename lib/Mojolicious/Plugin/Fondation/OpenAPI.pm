@@ -126,13 +126,14 @@ etc.) that should never be exposed as public API endpoints.
   sub fondation_meta {
       return {
           defaults => {
-              openapi_exclude => ['user_group'],
+              openapi_exclude => ['UserGroup'],
           },
       };
   }
 
-Each entry is a DBIx::Class source name (table name, e.g. C<user_group>),
-not the PascalCase Result class name. Excluded sources produce no CRUD
+Each entry is a DBIx::Class source moniker (class-derived name, e.g. C<UserGroup>),
+matching the C<register_source> moniker used by Action::DBIx.
+Excluded sources produce no CRUD
 routes, no OpenAPI schemas, and no C<public/js/validators.js> entries.
 
 B<Design:> The mechanism lives in plugin C<fondation_meta> rather than

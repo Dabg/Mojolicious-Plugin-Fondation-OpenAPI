@@ -32,9 +32,9 @@ sub build_app {
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
-                    bar => {source => 'bars'},
-                    baz => {source => 'bazs'},
+                    foo => {source => 'Foo'},
+                    bar => {source => 'Bar'},
+                    baz => {source => 'Baz'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {}},   # openapi_exclude => ['bazs'] is in its fondation_meta

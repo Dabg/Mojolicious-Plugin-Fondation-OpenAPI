@@ -8,11 +8,11 @@ sub fondation_meta {
     return {
         dependencies     => ['Fondation::Model::DBIx::Async'],
         defaults     => {
-            openapi_exclude => ['bazs'],
+            openapi_exclude => ['Baz'],
             models          => {
-                foo => {source => 'foos', backend => 'test'},
-                bar => {source => 'bars', backend => 'test'},
-                baz => {source => 'bazs', backend => 'test'},
+                foo => {source => 'Foo', backend => 'test'},
+                bar => {source => 'Bar', backend => 'test'},
+                baz => {source => 'Baz', backend => 'test'},
             },
         },
     };

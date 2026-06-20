@@ -34,7 +34,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
+                    foo => {source => 'Foo'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {}},
@@ -75,7 +75,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
+                    foo => {source => 'Foo'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {}},
@@ -117,7 +117,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
+                    foo => {source => 'Foo'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {}},
@@ -169,7 +169,7 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
+                    foo => {source => 'Foo'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {}},

@@ -1,4 +1,7 @@
 Revision history for Mojolicious-Plugin-Fondation-OpenAPI
 
+{{$NEXT}}
+  - replace table name with result_class name
+
 0.01 2026-06-09
   - Initial release

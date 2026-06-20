@@ -33,8 +33,8 @@ sub build_app {
                     },
                 ],
                 models => {
-                    foo => {source => 'foos'},
-                    bar => {source => 'bars'},
+                    foo => {source => 'Foo'},
+                    bar => {source => 'Bar'},
                 },
             }},
             {'Fondation::TestOpenAPI' => {
