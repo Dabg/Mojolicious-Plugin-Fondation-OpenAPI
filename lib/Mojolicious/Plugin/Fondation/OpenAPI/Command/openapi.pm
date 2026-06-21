@@ -312,8 +312,9 @@ sub _build_spec ($self, $schema_class, $app, $config) {
 
             $api_props{$col} = \%prop;
 
-            # Required: is_nullable explicitly set to 0 AND NOT writeOnly/readOnly
+            # Required: is_nullable explicitly set to 0, no default_value, AND NOT writeOnly/readOnly
             if ((exists $info->{is_nullable} && !$info->{is_nullable})
+                && !defined $info->{default_value}
                 && !$prop{writeOnly} && !$prop{readOnly}) {
                 push @api_required, $col;
             }
