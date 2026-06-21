@@ -236,6 +236,13 @@ sub fondation_finalyze ($self, $app, $long_name) {
         return;
     }
 
+    # Skip during 'fondation refresh' — the clean phase will remove the spec,
+    # then 'openapi generate -y' in the init phase will rebuild from scratch.
+    if (grep { $_ eq 'refresh' } @ARGV) {
+        $self->log->debug("Skipping OpenAPI load during fondation refresh");
+        return;
+    }
+
     # Load the OpenAPI plugin with the generated spec
     $app->plugin(OpenAPI => {
         url     => $spec_file->to_string,
