@@ -5,18 +5,25 @@ package Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi;
 use Mojo::Base 'Mojolicious::Command', -signatures;
 
 use Mojo::File 'path';
-use Mojo::JSON qw(encode_json true false);
+use Mojo::JSON qw(decode_json encode_json true false);
 
 our $VERSION = '0.01';
 
-has description => 'Generate OpenAPI specification';
+has description => 'OpenAPI specification generator and permission synchronizer';
 has usage       => sub ($self) {
     <<"USAGE";
-Usage: APPLICATION openapi generate [OPTIONS]
+Usage: APPLICATION openapi COMMAND [OPTIONS]
 
-  myapp.pl openapi generate               Generate share/openapi.json
-  myapp.pl openapi generate -y            Force overwrite without prompt
-  myapp.pl openapi generate --output FILE Custom output path
+Commands:
+  generate           Generate share/openapi.json
+  sync-permissions   Create missing permissions in the database from x-auth
+                     annotations in share/openapi.json, and assign them all
+                     to the admins group.
+  sync-permissions -q  Quiet mode (no output)
+
+Options (generate):
+  -y                 Force overwrite without prompt
+  --output FILE      Custom output path
 
 USAGE
 };
@@ -32,6 +39,10 @@ sub run ($self, @args) {
         or die "OpenAPI not configured. Add Fondation::OpenAPI to your config.\n";
 
     my $subcommand = shift @args || '';
+
+    if ($subcommand eq 'sync-permissions') {
+        return $self->_sync_permissions($app, $config, @args);
+    }
 
     die $self->usage unless $subcommand eq 'generate';
 
@@ -81,6 +92,130 @@ sub run ($self, @args) {
     $validators_path->dirname->make_path;
     $validators_path->spurt($validators_js);
     say "Client validators written to public/js/validators.js";
+}
+
+# ---------------------------------------------------------------------------
+# Sync permissions from share/openapi.json to the database
+# ---------------------------------------------------------------------------
+
+sub _sync_permissions ($self, $app, $config, @args) {
+    my $quiet = 0;
+    for (@args) {
+        if ($_ eq '-q') { $quiet = 1 }
+        else { die "Unknown option: $_\n" . $self->usage }
+    }
+
+    # 1. Read share/openapi.json
+    my $spec_file = $app->home->child('share', 'openapi.json');
+    unless (-f $spec_file) {
+        say "No spec found at share/openapi.json. Run 'openapi generate' first."
+            unless $quiet;
+        return;
+    }
+
+    my $spec = eval { decode_json($spec_file->slurp) };
+    die "Failed to parse share/openapi.json: $@\n" if $@;
+
+    # 2. Extract all unique permissions from x-auth
+    my %perms;
+    for my $path_data (values %{$spec->{paths} // {}}) {
+        for my $method (values %$path_data) {
+            next unless ref $method eq 'HASH';
+            my $x_auth = $method->{'x-auth'} or next;
+            for my $p (@{$x_auth->{permissions} // []}) {
+                $perms{$p} = 1;
+            }
+        }
+    }
+
+    unless (%perms) {
+        say "No permissions found in spec." unless $quiet;
+        return;
+    }
+
+    # 3. Build sync schema
+    my $c = $app->build_controller;
+    my $be = eval { $c->backend_config };
+    unless ($be) {
+        say "No backend configured. Cannot sync permissions." unless $quiet;
+        return;
+    }
+
+    my $schema;
+    eval {
+        my $schema_class = $be->{schema_class};
+        require Module::Runtime;
+        Module::Runtime::require_module($schema_class);
+        $schema = $schema_class->connect(
+            $be->{dsn}, $be->{user}, $be->{pass},
+            $be->{dbi_attrs} // {},
+        );
+    };
+    if ($@) {
+        say "Failed to connect to database: $@" unless $quiet;
+        return;
+    }
+
+    # 4. Check if Perm source is registered
+    my $rs_perm = eval { $schema->resultset('Perm') };
+    unless ($rs_perm) {
+        say "No 'Perm' source registered. Is Fondation::Perm loaded?"
+            unless $quiet;
+        return;
+    }
+
+    # 5. Create missing permissions
+    my (@created, @skipped);
+    for my $name (sort keys %perms) {
+        if ($rs_perm->find({ name => $name })) {
+            push @skipped, $name;
+        } else {
+            eval { $rs_perm->create({ name => $name }) };
+            if ($@) {
+                say "Failed to create permission '$name': $@" unless $quiet;
+            } else {
+                push @created, $name;
+            }
+        }
+    }
+
+    say "Permissions: created " . scalar(@created)
+        . ", skipped " . scalar(@skipped) . " (already exist)."
+        unless $quiet;
+
+    # 6. Ensure admins group exists
+    my $rs_group = eval { $schema->resultset('Group') };
+    my $admins;
+    if ($rs_group) {
+        $admins = $rs_group->find({ name => 'admins' });
+        unless ($admins) {
+            eval { $admins = $rs_group->create({ name => 'admins', active => 1 }) };
+            if ($@) {
+                say "Failed to create 'admins' group: $@" unless $quiet;
+                return;
+            }
+            say "Created 'admins' group." unless $quiet;
+        }
+    }
+
+    # 7. Assign all permissions to admins group
+    my $rs_gp = eval { $schema->resultset('GroupPerm') };
+    if ($rs_gp && $admins) {
+        my $assigned = 0;
+        for my $name (sort keys %perms) {
+            my $perm = $rs_perm->find({ name => $name }) or next;
+            unless ($rs_gp->find({ group_id => $admins->id, perm_id => $perm->id })) {
+                eval { $rs_gp->create({ group_id => $admins->id, perm_id => $perm->id }) };
+                if ($@) {
+                    say "Failed to assign '$name' to admins: $@" unless $quiet;
+                } else {
+                    $assigned++;
+                }
+            }
+        }
+        say "Assigned $assigned permission(s) to 'admins' group."
+            unless $quiet;
+    }
 }
 
 # ---------------------------------------------------------------------------

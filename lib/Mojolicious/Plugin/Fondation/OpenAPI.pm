@@ -16,9 +16,11 @@ sub fondation_meta {
             backend           => undef,
             fondation_init    => [
                 ['openapi', 'generate', '-y'],
+                ['openapi', 'sync-permissions', '-q'],
             ],
             fondation_upgrade => [
                 ['openapi', 'generate', '-y'],
+                ['openapi', 'sync-permissions', '-q'],
             ],
             fondation_clean   => [
                 'share/openapi.json',
