@@ -10,8 +10,7 @@ use Mojo::File 'path';
 
 sub fondation_meta {
     return {
-        dependencies      => ['Fondation::Model::DBIx::Async'],
-        provides_actions  => ['OpenAPIRoutes'],
+        dependencies => ['Fondation::Model::DBIx::Async'],
         defaults     => {
             backend           => undef,
             fondation_init    => [
@@ -114,8 +113,8 @@ C<{moniker_lc}_{operation}> (e.g., C<user_create>, C<group_list>).
 
 Overrides replace the default entirely. An empty C<permissions> array
 makes the endpoint public (no C<x-auth> in the generated spec).
-Additional constraint keys (C<groups>, C<features>, etc.) are supported
-by the L<Mojolicious::Plugin::Fondation::OpenAPI::Security> sub-plugin.
+Additional constraint keys (C<groups>, C<features>, etc.) are translated
+into C<requires()> route conditions at startup via the C<openapi_routes_added> hook.
 
 =head2 openapi_exclude in plugin C<fondation_meta>
 
@@ -183,6 +182,10 @@ Options: C<-y> (overwrite without prompt), C<--output> (custom path).
 
 On startup (C<fondation_finalyze>), if C<share/openapi.json> exists it
 is loaded via L<Mojolicious::Plugin::OpenAPI> for request validation.
+C<x-auth> permissions and groups are translated into route-level
+C<requires('fondation.perm')> and C<requires('fondation.group')>
+conditions via the C<openapi_routes_added> hook, unifying protection
+with HTML routes.
 Swagger UI routes (C</swagger> and C</openapi.json>) are added in
 development mode. If the spec is missing, a warning is logged and
 startup continues.
@@ -245,13 +248,79 @@ sub fondation_finalyze ($self, $app, $long_name) {
         return;
     }
 
-    # Load the OpenAPI plugin with the generated spec
+    # Apply route-level requires() from x-auth in the OpenAPI spec.
+    # Hook MUST be registered BEFORE loading OpenAPI so it fires during _add_routes.
+    # Also overrides fondation.perm / fondation.group conditions with mode-aware
+    # 403 handling. The /error/403 page is registered here as well.
+    $app->plugins->on(openapi_routes_added => sub {
+        my ($openapi, $routes) = @_;
+        $routes ||= [];
+
+        # Register /error/403 page (template overridable by error page plugin)
+        $app->routes->get('/error/403')->to(cb => sub {
+            my $c = shift;
+            $c->render(template => 'error/403', status => 403);
+        });
+
+        # Override conditions: dev mode shows reason, prod mode is silent.
+        # API routes always get JSON error body. HTML routes get text (dev)
+        # or redirect to /error/403 (prod).
+        for my $cond (qw(fondation.perm fondation.group)) {
+            $app->routes->add_condition($cond => sub {
+                my ($route, $c, $captures, $value) = @_;
+                my $method = $cond eq 'fondation.perm'
+                    ? 'check_perm' : 'check_group';
+                return 1 if $c->$method($value);
+
+                my $is_dev  = $c->app->mode eq 'development';
+                my $stack   = $c->match->stack;
+                my $is_api  = @$stack && $stack->[-1]{'openapi.path'};
+                my $label   = $cond eq 'fondation.perm'
+                    ? 'Permission' : 'Group';
+
+                if ($is_api) {
+                    my $msg = $is_dev
+                        ? "$label '$value' required" : 'Forbidden';
+                    $c->render(
+                        openapi => {
+                            errors => [{message => $msg, path => '/x-auth'}],
+                        },
+                        status => 403,
+                    );
+                } else {
+                    if ($is_dev) {
+                        $c->render(
+                            text   => "$label '$value' required",
+                            status => 403,
+                        );
+                    } else {
+                        $c->redirect_to('/error/403');
+                    }
+                }
+                return undef;
+            });
+        }
+
+        for my $r (@$routes) {
+            my $defaults = $r->pattern->defaults;
+            my $path     = $defaults->{'openapi.path'};
+            my $method   = $defaults->{'openapi.method'};
+            next unless $path && $method;
+
+            my $op_spec = $openapi->validator->get([paths => $path, $method]);
+            my $x_auth  = $op_spec->{'x-auth'} // {};
+
+            my @conditions;
+            push @conditions, 'fondation.perm'  => $_ for @{$x_auth->{permissions} // []};
+            push @conditions, 'fondation.group' => $_ for @{$x_auth->{groups}     // []};
+            $r->requires(@conditions) if @conditions;
+        }
+    });
+
+    # Load the OpenAPI plugin with the generated spec.
+    # No Security sub-plugin — x-auth is translated into route-level requires() above.
     $app->plugin(OpenAPI => {
-        url     => $spec_file->to_string,
-        plugins => [
-            '+Security',
-            'Mojolicious::Plugin::Fondation::OpenAPI::Security',
-        ],
+        url => $spec_file->to_string,
     });
     $self->log->debug("OpenAPI plugin loaded from $spec_file");
 

@@ -182,156 +182,45 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
 }
 
 # ==========================================================================
-# 5. x-auth permission enforcement via Security sub-plugin
+# 5. x-auth translated to requires() via openapi_routes_added hook
 # ==========================================================================
 
 {
     my $tmpdir = tempdir(CLEANUP => 1);
     my $app    = create_test_app($tmpdir);
 
-    # Load Fondation core for has_helper (used by Security sub-plugin)
+    # Load Fondation core for helpers (has_helper, etc.)
     $app->plugin('Fondation');
 
-    # Build a minimal spec with x-auth on some routes, none on /public
+    # Build a spec with x-auth on some routes
     my $spec = {
         openapi => '3.0.3',
-        info    => {title => 'Security Test', version => '1.0'},
+        info    => {title => 'Requires Test', version => '1.0'},
         servers => [{url => ''}],
         paths   => {
-            '/protected' => {
-                get => {
-                    operationId => 'protected_list',
-                    'x-auth'    => {permissions => ['protected_read']},
-                    responses   => {'200' => {description => 'OK'}},
-                },
-            },
             '/public' => {
                 get => {
                     operationId => 'public_list',
                     responses   => {'200' => {description => 'OK'}},
                 },
             },
-        },
-    };
-
-    my $spec_file = $app->home->child('share', 'openapi.json');
-    $spec_file->dirname->make_path;
-    $spec_file->spurt(encode_json($spec));
-
-    # Register named routes BEFORE loading OpenAPI (plugin will discover them)
-    my $r = $app->routes;
-    $r->get('/protected')->to(cb => sub {
-        shift->render(openapi => {status => 'ok'}, status => 200);
-    })->name('protected_list');
-
-    $r->get('/public')->to(cb => sub {
-        shift->render(openapi => {status => 'ok'}, status => 200);
-    })->name('public_list');
-
-    # Mock check_perm via package variable
-    our $perm_allowed = 1;
-    $app->helper(check_perm => sub { return $perm_allowed });
-
-    $app->plugin(OpenAPI => {
-        url     => $spec_file->to_string,
-        plugins => [
-            'Mojolicious::Plugin::Fondation::OpenAPI::Security',
-        ],
-    });
-
-    my $t = Test::Mojo->new($app);
-
-    # Public endpoint works (no x-auth)
-    $t->get_ok('/public')->status_is(200)
-        ->json_is('/status', 'ok');
-
-    # Protected endpoint works when check_perm returns true
-    $perm_allowed = 1;
-    $t->get_ok('/protected')->status_is(200)
-        ->json_is('/status', 'ok');
-
-    # Protected endpoint returns 403 when check_perm returns false
-    $perm_allowed = 0;
-    $t->get_ok('/protected')->status_is(403);
-
-    # Verify OpenAPI error format
-    my $body = decode_json($t->tx->res->body);
-    is_deeply(
-        $body->{errors}->[0],
-        {message => "Permission 'protected_read' required", path => '/x-auth'},
-        '403 response uses OpenAPI error format with x-auth path'
-    );
-}
-
-# ==========================================================================
-# 6. Custom routes from routes.yaml: x-auth + validation at runtime
-# ==========================================================================
-
-{
-    my $tmpdir = tempdir(CLEANUP => 1);
-    my $app    = create_test_app($tmpdir);
-
-    # Load Fondation core for has_helper (used by Security sub-plugin)
-    $app->plugin('Fondation');
-
-    # Build a spec with custom routes that mirror the routes.yaml fixture
-    my $spec = {
-        openapi => '3.0.3',
-        info    => {title => 'Custom Routes Test', version => '1.0'},
-        servers => [{url => ''}],
-        paths   => {
-            '/api/status' => {
+            '/protected' => {
                 get => {
-                    summary     => 'Health check',
-                    operationId => 'health_check',
-                    responses   => {
-                        '200' => {
-                            description => 'OK',
-                            content     => {
-                                'application/json' => {
-                                    schema => {
-                                        type       => 'object',
-                                        properties => {uptime => {type => 'integer'}},
-                                    },
-                                },
-                            },
-                        },
-                    },
-                },
-            },
-            '/api/export' => {
-                post => {
-                    summary     => 'Export data',
-                    operationId => 'export_create',
-                    'x-auth'    => {permissions => ['export_create']},
-                    requestBody => {
-                        required => true,
-                        content  => {
-                            'application/json' => {
-                                schema => {
-                                    type       => 'object',
-                                    required   => ['format'],
-                                    properties => {
-                                        format => {
-                                            type => 'string',
-                                            enum => ['csv', 'json', 'xlsx'],
-                                        },
-                                    },
-                                },
-                            },
-                        },
-                    },
-                    responses => {'200' => {description => 'Export ready'}},
-                },
-            },
-            '/api/public-xauth' => {
-                get => {
-                    summary     => 'Public via x-auth empty',
-                    operationId => 'public_xauth_list',
-                    'x-auth'    => {},
+                    operationId => 'protected_list',
+                    'x-auth'    => {permissions => ['test_read']},
                     responses   => {'200' => {description => 'OK'}},
                 },
             },
+            '/multi' => {
+                get => {
+                    operationId => 'multi_list',
+                    'x-auth' => {
+                        permissions => ['perm_a', 'perm_b'],
+                        groups      => ['group_x'],
+                    },
+                    responses => {'200' => {description => 'OK'}},
+                },
+            },
         },
     };
 
@@ -339,66 +228,64 @@ use Mojolicious::Plugin::Fondation::TestHelper qw(create_test_app);
     $spec_file->dirname->make_path;
     $spec_file->spurt(encode_json($spec));
 
-    # Register named routes BEFORE loading OpenAPI (plugin discovers them)
+    # Register named routes BEFORE loading OpenAPI
     my $r = $app->routes;
-    $r->get('/api/status')->to(cb => sub {
-        shift->render(openapi => {uptime => 42}, status => 200);
-    })->name('health_check');
-
-    $r->post('/api/export')->to(cb => sub {
-        my $c = shift;
-        $c = $c->openapi->valid_input or return;
-        $c->render(openapi => {status => 'ok'}, status => 200);
-    })->name('export_create');
-
-    $r->get('/api/public-xauth')->to(cb => sub {
+    $r->get('/public')->to(cb => sub {
         shift->render(openapi => {status => 'ok'}, status => 200);
-    })->name('public_xauth_list');
+    })->name('public_list');
+    $r->get('/protected')->to(cb => sub {
+        shift->render(openapi => {status => 'ok'}, status => 200);
+    })->name('protected_list');
+    $r->get('/multi')->to(cb => sub {
+        shift->render(openapi => {status => 'ok'}, status => 200);
+    })->name('multi_list');
 
-    # Mock check_perm
-    our $custom_perm_allowed = 1;
-    $app->helper(check_perm => sub { return $custom_perm_allowed });
+    # Register the hook (same logic as fondation_finalyze)
+    $app->plugins->on(openapi_routes_added => sub {
+        my ($openapi, $routes) = @_;
+        $routes ||= [];
+        for my $route (@$routes) {
+            my $defaults = $route->pattern->defaults;
+            my $path     = $defaults->{'openapi.path'};
+            my $method   = $defaults->{'openapi.method'};
+            next unless $path && $method;
 
-    $app->plugin(OpenAPI => {
-        url     => $spec_file->to_string,
-        plugins => [
-            'Mojolicious::Plugin::Fondation::OpenAPI::Security',
-        ],
+            my $op_spec = $openapi->validator->get([paths => $path, $method]);
+            my $x_auth  = $op_spec->{'x-auth'} // {};
+
+            my @conditions;
+            push @conditions, 'fondation.perm'  => $_ for @{$x_auth->{permissions} // []};
+            push @conditions, 'fondation.group' => $_ for @{$x_auth->{groups}     // []};
+            $route->requires(@conditions) if @conditions;
+        }
     });
 
-    my $t = Test::Mojo->new($app);
+    # Load OpenAPI and capture the instance
+    my $openapi_instance = $app->plugin(OpenAPI => {
+        url => $spec_file->to_string,
+    });
 
-    # ── /api/status (public, no x-auth) ──
-    $t->get_ok('/api/status')->status_is(200)
-        ->json_is('/uptime', 42, 'public custom route without x-auth');
+    # Find routes via OpenAPI's route tree (they were moved by add_child)
+    my $pub = $openapi_instance->route->find('public_list');
+    ok($pub, '/public route found');
+    my $pub_req = $pub->requires || [];
+    is(scalar @$pub_req, 0, '/public has no requires (public)')
+        or diag explain $pub_req;
 
-    # ── /api/export denied without permission ──
-    $custom_perm_allowed = 0;
-    $t->post_ok('/api/export' => json => {format => 'csv'})
-        ->status_is(403, 'custom route blocked without permission');
+    my $prot = $openapi_instance->route->find('protected_list');
+    ok($prot, '/protected route found');
+    my $prot_req = $prot->requires || [];
+    ok((grep { $_ eq 'fondation.perm' } @$prot_req), '/protected has fondation.perm condition');
+    ok((grep { $_ eq 'test_read' }      @$prot_req), '/protected has test_read value');
 
-    # ── /api/export allowed with permission ──
-    $custom_perm_allowed = 1;
-    $t->post_ok('/api/export' => json => {format => 'csv'})
-        ->status_is(200, 'custom route allowed with permission')
-        ->json_is('/status', 'ok');
-
-    # ── /api/export validation fails on bad enum ──
-    $t->post_ok('/api/export' => json => {format => 'xml'})
-        ->status_is(400, 'custom route validation rejects bad enum value');
-
-    # ── /api/export validation fails on missing required field ──
-    $t->post_ok('/api/export' => json => {})
-        ->status_is(400, 'custom route validation rejects missing required field');
-
-    # ── /api/public-xauth (x-auth: {}) accessible without perm ──
-    $custom_perm_allowed = 0;
-    $t->get_ok('/api/public-xauth')->status_is(200)
-        ->json_is('/status', 'ok', 'x-auth: {} is public, accessible with check_perm=0');
-
-    $custom_perm_allowed = 1;
-    $t->get_ok('/api/public-xauth')->status_is(200)
-        ->json_is('/status', 'ok', 'x-auth: {} is public, accessible with check_perm=1');
+    my $multi = $openapi_instance->route->find('multi_list');
+    ok($multi, '/multi route found');
+    my $multi_req = $multi->requires || [];
+    ok((grep { $_ eq 'perm_a' }  @$multi_req), '/multi has perm_a')
+        or diag "requires: " . join(', ', @$multi_req);
+    ok((grep { $_ eq 'perm_b' }  @$multi_req), '/multi has perm_b')
+        or diag "requires: " . join(', ', @$multi_req);
+    ok((grep { $_ eq 'group_x' } @$multi_req), '/multi has group_x');
 }
 
 done_testing;

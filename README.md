@@ -84,8 +84,8 @@ in the `schemas` config. The default convention is
 
 Overrides replace the default entirely. An empty `permissions` array
 makes the endpoint public (no `x-auth` in the generated spec).
-Additional constraint keys (`groups`, `features`, etc.) are supported
-by the [Mojolicious::Plugin::Fondation::OpenAPI::Security](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AFondation%3A%3AOpenAPI%3A%3ASecurity) sub-plugin.
+Additional constraint keys (`groups`, `features`, etc.) are translated
+into `requires()` route conditions at startup via the `openapi_routes_added` hook.
 
 ## openapi\_exclude in plugin `fondation_meta`
 
@@ -153,6 +153,10 @@ Options: `-y` (overwrite without prompt), `--output` (custom path).
 
 On startup (`fondation_finalyze`), if `share/openapi.json` exists it
 is loaded via [Mojolicious::Plugin::OpenAPI](https://metacpan.org/pod/Mojolicious%3A%3APlugin%3A%3AOpenAPI) for request validation.
+`x-auth` permissions and groups are translated into route-level
+`requires('fondation.perm')` and `requires('fondation.group')`
+conditions via the `openapi_routes_added` hook, unifying protection
+with HTML routes.
 Swagger UI routes (`/swagger` and `/openapi.json`) are added in
 development mode. If the spec is missing, a warning is logged and
 startup continues.
