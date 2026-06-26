@@ -18,7 +18,7 @@ Commands:
   generate           Generate share/openapi.json
   sync-permissions   Create missing permissions in the database from x-auth
                      annotations in share/openapi.json, and assign them all
-                     to the admins group.
+                     to the admin group.
   sync-permissions -q  Quiet mode (no output)
 
 Options (generate):
@@ -159,8 +159,8 @@ sub _sync_permissions ($self, $app, $config, @args) {
     # 4. Check if Perm source is registered
     my $rs_perm = eval { $schema->resultset('Perm') };
     unless ($rs_perm) {
-        say "No 'Perm' source registered. Is Fondation::Perm loaded?"
-            unless $quiet;
+        warn "[sync-permissions] No 'Perm' source registered."
+            . " Is Fondation::Perm loaded?\n";
         return;
     }
 
@@ -179,43 +179,46 @@ sub _sync_permissions ($self, $app, $config, @args) {
         }
     }
 
-    say "Permissions: created " . scalar(@created)
-        . ", skipped " . scalar(@skipped) . " (already exist)."
-        unless $quiet;
+    warn "[sync-permissions] Permissions: created " . scalar(@created)
+        . ", skipped " . scalar(@skipped) . " (already exist).\n";
 
-    # 6. Ensure admins group exists
+    # 6. Ensure admin group exists
     my $rs_group = eval { $schema->resultset('Group') };
-    my $admins;
-    if ($rs_group) {
-        $admins = $rs_group->find({ name => 'admins' });
-        unless ($admins) {
-            eval { $admins = $rs_group->create({ name => 'admins', active => 1 }) };
-            if ($@) {
-                say "Failed to create 'admins' group: $@" unless $quiet;
-                return;
-            }
-            say "Created 'admins' group." unless $quiet;
+    unless ($rs_group) {
+        warn "[sync-permissions] No 'Group' source registered."
+            . " Is Fondation::Group loaded?\n";
+        return;
+    }
+    my $admin = $rs_group->find({ name => 'admin' });
+    unless ($admin) {
+        eval { $admin = $rs_group->create({ name => 'admin', active => 1 }) };
+        if ($@) {
+            warn "[sync-permissions] Failed to create 'admin' group: $@\n";
+            return;
         }
+        warn "[sync-permissions] Created 'admin' group.\n";
     }
 
-    # 7. Assign all permissions to admins group
+    # 7. Assign all permissions to admin group
     my $rs_gp = eval { $schema->resultset('GroupPerm') };
-    if ($rs_gp && $admins) {
-        my $assigned = 0;
-        for my $name (sort keys %perms) {
-            my $perm = $rs_perm->find({ name => $name }) or next;
-            unless ($rs_gp->find({ group_id => $admins->id, perm_id => $perm->id })) {
-                eval { $rs_gp->create({ group_id => $admins->id, perm_id => $perm->id }) };
-                if ($@) {
-                    say "Failed to assign '$name' to admins: $@" unless $quiet;
-                } else {
-                    $assigned++;
-                }
+    unless ($rs_gp) {
+        warn "[sync-permissions] No 'GroupPerm' source registered."
+            . " Is Fondation::Perm loaded?\n";
+        return;
+    }
+    my $assigned = 0;
+    for my $name (sort keys %perms) {
+        my $perm = $rs_perm->find({ name => $name }) or next;
+        unless ($rs_gp->find({ group_id => $admin->id, perm_id => $perm->id })) {
+            eval { $rs_gp->create({ group_id => $admin->id, perm_id => $perm->id }) };
+            if ($@) {
+                warn "[sync-permissions] Failed to assign '$name' to admin: $@\n";
+            } else {
+                $assigned++;
             }
         }
-        say "Assigned $assigned permission(s) to 'admins' group."
-            unless $quiet;
     }
+    warn "[sync-permissions] Assigned $assigned permission(s) to 'admin' group.\n";
 }
 
 # ---------------------------------------------------------------------------
