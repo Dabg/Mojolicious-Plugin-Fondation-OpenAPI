@@ -705,16 +705,6 @@ sub _build_spec ($self, $schema_class, $app, $config) {
         };
     }
 
-    # ── Merge custom routes from plugins (share/routes.yaml) ─────────
-    my $custom_routes = $app->{openapi_routes} // {};
-    for my $path (sort keys %$custom_routes) {
-        my $ops = $custom_routes->{$path};
-        $spec->{paths}{$path} = {
-            %{ $spec->{paths}{$path} // {} },
-            %$ops,
-        };
-    }
-
     return $spec;
 }
 
