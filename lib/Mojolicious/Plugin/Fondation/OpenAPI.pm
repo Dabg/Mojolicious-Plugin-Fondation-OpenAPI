@@ -10,7 +10,7 @@ use Mojo::File 'path';
 
 sub fondation_meta {
     return {
-        dependencies => ['Fondation::Model::DBIx::Async'],
+        dependencies => ['Fondation::Model::DBIx::Async', 'Fondation::Problem'],
         defaults     => {
             backend           => undef,
             fondation_init    => [
@@ -250,21 +250,13 @@ sub fondation_finalyze ($self, $app, $long_name) {
 
     # Apply route-level requires() from x-auth in the OpenAPI spec.
     # Hook MUST be registered BEFORE loading OpenAPI so it fires during _add_routes.
-    # Also overrides fondation.perm / fondation.group conditions with mode-aware
-    # 403 handling. The /error/403 page is registered here as well.
+    # Override conditions with mode-aware handling via $c->problem().
     $app->plugins->on(openapi_routes_added => sub {
         my ($openapi, $routes) = @_;
         $routes ||= [];
 
-        # Register /error/403 page (template overridable by error page plugin)
-        $app->routes->get('/error/403')->to(cb => sub {
-            my $c = shift;
-            $c->render(template => 'error/403', status => 403);
-        });
-
-        # Override conditions: dev mode shows reason, prod mode is silent.
-        # API routes always get JSON error body. HTML routes get text (dev)
-        # or redirect to /error/403 (prod).
+        # Override conditions with mode-aware handling via $c->problem().
+        # API routes auto-detected via openapi.path in match stack.
         for my $cond (qw(fondation.perm fondation.group)) {
             $app->routes->add_condition($cond => sub {
                 my ($route, $c, $captures, $value) = @_;
@@ -272,31 +264,13 @@ sub fondation_finalyze ($self, $app, $long_name) {
                     ? 'check_perm' : 'check_group';
                 return 1 if $c->$method($value);
 
-                my $is_dev  = $c->app->mode eq 'development';
-                my $stack   = $c->match->stack;
-                my $is_api  = @$stack && $stack->[-1]{'openapi.path'};
-                my $label   = $cond eq 'fondation.perm'
+                my $label = $cond eq 'fondation.perm'
                     ? 'Permission' : 'Group';
-
-                if ($is_api) {
-                    my $msg = $is_dev
-                        ? "$label '$value' required" : 'Forbidden';
-                    $c->render(
-                        openapi => {
-                            errors => [{message => $msg, path => '/x-auth'}],
-                        },
-                        status => 403,
-                    );
-                } else {
-                    if ($is_dev) {
-                        $c->render(
-                            text   => "$label '$value' required",
-                            status => 403,
-                        );
-                    } else {
-                        $c->redirect_to('/error/403');
-                    }
-                }
+                $c->problem(
+                    status => 403,
+                    title  => 'Forbidden',
+                    detail => "$label '$value' required",
+                );
                 return undef;
             });
         }
