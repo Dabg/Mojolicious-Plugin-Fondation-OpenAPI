@@ -11,6 +11,7 @@ use Mojo::File 'path';
 sub fondation_meta {
     return {
         dependencies => ['Fondation::Model::DBIx::Async', 'Fondation::Problem'],
+        after => ['Fondation::MigrationDBIx'],
         defaults     => {
             backend           => undef,
             fondation_init    => [
