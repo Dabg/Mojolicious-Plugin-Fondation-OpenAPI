@@ -1,7 +1,6 @@
 package Mojolicious::Plugin::Fondation::OpenAPI;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
-our $VERSION = '0.01';
 
 use Mojo::JSON qw(decode_json);
 use Mojo::File 'path';
