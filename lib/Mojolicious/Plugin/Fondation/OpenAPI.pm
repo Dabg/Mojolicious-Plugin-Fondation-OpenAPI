@@ -159,10 +159,6 @@ removed from the Perl C API in 5.40. This cascades:
   Net::IDN::Encode → compile FAIL (Perl ≥ 5.40)
     → JSON::Validator 5.17+ → blocked by cpanm
       → Mojolicious::Plugin::OpenAPI 5.12 → blocked
-        → Fondation::OpenAPI → blocked
-
-JSON::Validator only uses Net::IDN::Encode for hostname validation
-(optional, not needed by Fondation).
 
 B<Workaround on Debian:> the C<libnet-idn-encode-perl> package provides
 a pre-compiled version that works on Perl 5.40:
