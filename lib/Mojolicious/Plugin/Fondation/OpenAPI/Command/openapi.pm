@@ -132,26 +132,11 @@ sub _sync_permissions ($self, $app, $config, @args) {
         return;
     }
 
-    # 3. Build sync schema
+    # 3. Get schema from Model::DBIx::Async (lazy, cached, worker pool)
     my $c = $app->build_controller;
-    my $be = eval { $c->backend_config };
-    unless ($be) {
+    my $schema = eval { $c->schema };
+    unless ($schema) {
         say "No backend configured. Cannot sync permissions." unless $quiet;
-        return;
-    }
-
-    my $schema;
-    eval {
-        my $schema_class = $be->{schema_class};
-        require Module::Runtime;
-        Module::Runtime::require_module($schema_class);
-        $schema = $schema_class->connect(
-            $be->{dsn}, $be->{user}, $be->{pass},
-            $be->{dbi_attrs} // {},
-        );
-    };
-    if ($@) {
-        say "Failed to connect to database: $@" unless $quiet;
         return;
     }
 
@@ -166,10 +151,10 @@ sub _sync_permissions ($self, $app, $config, @args) {
     # 5. Create missing permissions
     my (@created, @skipped);
     for my $name (sort keys %perms) {
-        if ($rs_perm->find({ name => $name })) {
+        if ($schema->await($rs_perm->find({ name => $name }))) {
             push @skipped, $name;
         } else {
-            eval { $rs_perm->create({ name => $name }) };
+            eval { $schema->await($rs_perm->create({ name => $name })) };
             if ($@) {
                 say "Failed to create permission '$name': $@" unless $quiet;
             } else {
@@ -188,9 +173,9 @@ sub _sync_permissions ($self, $app, $config, @args) {
             . " Is Fondation::Group loaded?\n";
         return;
     }
-    my $admin = $rs_group->find({ name => 'admin' });
+    my $admin = $schema->await($rs_group->find({ name => 'admin' }));
     unless ($admin) {
-        eval { $admin = $rs_group->create({ name => 'admin', active => 1 }) };
+        eval { $admin = $schema->await($rs_group->create({ name => 'admin', active => 1 })) };
         if ($@) {
             warn "[sync-permissions] Failed to create 'admin' group: $@\n";
             return;
@@ -207,9 +192,9 @@ sub _sync_permissions ($self, $app, $config, @args) {
     }
     my $assigned = 0;
     for my $name (sort keys %perms) {
-        my $perm = $rs_perm->find({ name => $name }) or next;
-        unless ($rs_gp->find({ group_id => $admin->id, perm_id => $perm->id })) {
-            eval { $rs_gp->create({ group_id => $admin->id, perm_id => $perm->id }) };
+        my $perm = $schema->await($rs_perm->find({ name => $name })) or next;
+        unless ($schema->await($rs_gp->find({ group_id => $admin->id, perm_id => $perm->id }))) {
+            eval { $schema->await($rs_gp->create({ group_id => $admin->id, perm_id => $perm->id })) };
             if ($@) {
                 warn "[sync-permissions] Failed to assign '$name' to admin: $@\n";
             } else {
@@ -852,6 +837,8 @@ __END__
 =head1 NAME
 
 Mojolicious::Plugin::Fondation::OpenAPI::Command::openapi - Generate OpenAPI specification from DBIx::Class sources
+
+This module is more than experimental !
 
 =head1 SYNOPSIS
 

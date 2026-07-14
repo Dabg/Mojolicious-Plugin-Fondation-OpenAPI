@@ -3,6 +3,7 @@ Revision history for Mojolicious-Plugin-Fondation-OpenAPI
 {{$NEXT}}
   - replace table name with result_class name
   - when default_value then not required
+  - uses Model::DBIx::Async to synchronize permissions
 
 0.01 2026-06-09
   - Initial release
