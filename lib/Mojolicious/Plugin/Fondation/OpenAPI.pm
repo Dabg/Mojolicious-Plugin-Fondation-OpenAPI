@@ -303,11 +303,12 @@ sub fondation_finalyze ($self, $app, $long_name) {
 
                 my $label = $cond eq 'fondation.perm'
                     ? 'Permission' : 'Group';
-                $c->problem(
+                $c->res->code(403);
+                $c->stash('fondation.denied' => {
                     status => 403,
                     title  => 'Forbidden',
                     detail => "$label '$value' required",
-                );
+                }) unless $c->stash('fondation.denied');
                 return undef;
             });
         }
