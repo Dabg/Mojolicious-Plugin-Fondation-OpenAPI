@@ -1,6 +1,8 @@
 Revision history for Mojolicious-Plugin-Fondation-OpenAPI
 
 {{$NEXT}}
+
+0.05      2026-08-21 19:59:33+02:00 Europe/Paris
   - fix: perm/group condition override sets fondation.denied marker + regression test
 
 0.04      2026-08-16 19:52:28+02:00 Europe/Paris
